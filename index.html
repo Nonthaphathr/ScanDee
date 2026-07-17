@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ScanDee (สแกนดี) — ตรวจกระดาษคำตอบด้วยกล้องมือถือ</title>
+
+<!-- ฟอนต์ไทย -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=Prompt:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- ไลบรารีภายนอก: jsQR (อ่าน QR) + qrcode-generator (สร้าง QR) + SheetJS (Excel) -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+/* ═══════════════════════════ ตัวแปรสี/ธีม ═══════════════════════════ */
+:root{
+  --blue:#1565c0; --blue-dark:#0d47a1; --blue-light:#e3f0fc; --blue-soft:#bbdefb;
+  --white:#ffffff; --bg:#f4f7fb; --ink:#1a2233; --muted:#6b7789;
+  --line:#dbe3ef; --ok:#2e9e5b; --warn:#e8a400; --err:#d93636;
+  --shadow:0 2px 12px rgba(20,50,90,.10); --radius:14px;
+  --tabh:64px; --headerh:56px;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  font-family:'Sarabun','Prompt',sans-serif; background:var(--bg); color:var(--ink);
+  font-size:16px; line-height:1.5; overscroll-behavior-y:none;
+}
+button,input,select,textarea{font-family:inherit; font-size:16px;}
+h1,h2,h3,h4{font-family:'Prompt','Sarabun',sans-serif; margin:0 0 .4em; font-weight:600;}
+a{color:var(--blue);}
+
+/* ── โครงหน้า ── */
+#app{max-width:600px; margin:0 auto; min-height:100vh; position:relative; background:var(--bg);}
+.appbar{
+  position:sticky; top:0; z-index:50; height:var(--headerh);
+  background:linear-gradient(135deg,var(--blue),var(--blue-dark)); color:#fff;
+  display:flex; align-items:center; gap:10px; padding:0 16px; box-shadow:var(--shadow);
+}
+.appbar .logo{font-family:'Prompt'; font-weight:700; font-size:20px; letter-spacing:.3px;}
+.appbar .sub{font-size:11px; opacity:.85; margin-left:auto; text-align:right; line-height:1.25;}
+main{padding:14px 14px calc(var(--tabh) + 20px); }
+
+/* ── การ์ด ── */
+.card{background:var(--white); border-radius:var(--radius); box-shadow:var(--shadow);
+  padding:16px; margin-bottom:14px; border:1px solid var(--line);}
+.card h2{font-size:17px; color:var(--blue-dark);}
+.card h3{font-size:15px;}
+.muted{color:var(--muted); font-size:14px;}
+.row{display:flex; gap:10px; align-items:center;}
+.row.wrap{flex-wrap:wrap;}
+.spread{display:flex; justify-content:space-between; align-items:center; gap:10px;}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;}
+
+/* ── ปุ่ม ── */
+.btn{display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  border:none; border-radius:12px; padding:12px 16px; font-weight:600; cursor:pointer;
+  background:var(--blue); color:#fff; transition:.15s; min-height:48px;}
+.btn:active{transform:scale(.97);}
+.btn.block{width:100%;}
+.btn.lg{font-size:18px; padding:16px; min-height:58px;}
+.btn.ghost{background:var(--blue-light); color:var(--blue-dark);}
+.btn.gray{background:#eef1f6; color:var(--ink);}
+.btn.danger{background:var(--err);}
+.btn.ok{background:var(--ok);}
+.btn.warn{background:var(--warn); color:#3a2c00;}
+.btn.sm{padding:8px 12px; min-height:40px; font-size:14px; border-radius:10px;}
+.btn:disabled{opacity:.5; pointer-events:none;}
+.iconbtn{background:transparent; border:none; color:var(--blue-dark); padding:6px; cursor:pointer; font-size:20px;}
+
+/* ── ฟอร์ม ── */
+label.fld{display:block; margin-bottom:12px;}
+label.fld > span{display:block; font-size:13px; color:var(--muted); margin-bottom:4px; font-weight:600;}
+input[type=text],input[type=number],input[type=date],select,textarea{
+  width:100%; padding:11px 12px; border:1.5px solid var(--line); border-radius:10px;
+  background:#fff; color:var(--ink);}
+input:focus,select:focus,textarea:focus{outline:none; border-color:var(--blue);}
+textarea{resize:vertical; min-height:70px; font-family:inherit;}
+
+/* ── ตาราง ── */
+.tbl{width:100%; border-collapse:collapse; font-size:14px;}
+.tbl th,.tbl td{padding:8px 8px; border-bottom:1px solid var(--line); text-align:left;}
+.tbl th{color:var(--muted); font-weight:600; font-size:12px; text-transform:none;}
+.tbl tr:active{background:var(--blue-light);}
+.tbl .num{text-align:right; font-variant-numeric:tabular-nums;}
+.scroll-x{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+
+/* ── badge/pill ── */
+.pill{display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600;}
+.pill.blue{background:var(--blue-light); color:var(--blue-dark);}
+.pill.ok{background:#e3f6ea; color:var(--ok);}
+.pill.warn{background:#fdf3d6; color:#8a6400;}
+.pill.err{background:#fde3e3; color:var(--err);}
+.pill.gray{background:#eef1f6; color:var(--muted);}
+
+/* ── สถิติ ── */
+.stat{background:var(--blue-light); border-radius:12px; padding:12px; text-align:center;}
+.stat .v{font-size:22px; font-weight:700; color:var(--blue-dark); font-family:'Prompt';}
+.stat .k{font-size:12px; color:var(--muted);}
+
+/* ── tab bar ── */
+.tabbar{position:fixed; left:0; right:0; bottom:0; height:var(--tabh); z-index:60;
+  background:#fff; border-top:1px solid var(--line); display:flex; max-width:600px; margin:0 auto;
+  box-shadow:0 -2px 12px rgba(20,50,90,.08);}
+.tabbar button{flex:1; background:none; border:none; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:3px; color:var(--muted); cursor:pointer; padding:6px 0;}
+.tabbar button .ic{font-size:20px; line-height:1;}
+.tabbar button .lb{font-size:11px; font-weight:600;}
+.tabbar button.active{color:var(--blue);}
+.tabbar button.active .ic{transform:translateY(-1px);}
+
+/* ── ฝนตัวเลือก (UI เฉลย) ── */
+.bubble-choice{width:34px; height:34px; border-radius:50%; border:2px solid var(--blue-soft);
+  display:inline-flex; align-items:center; justify-content:center; font-weight:700; color:var(--blue);
+  background:#fff; cursor:pointer; font-size:14px; user-select:none;}
+.bubble-choice.sel{background:var(--blue); color:#fff; border-color:var(--blue-dark);}
+.keyrow{display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed var(--line);}
+.keyrow .qn{width:34px; text-align:right; font-weight:700; color:var(--muted); font-variant-numeric:tabular-nums;}
+.keyrow .sc{width:56px;}
+.keyrow .sc input{padding:6px; text-align:center;}
+
+/* ── toast ── */
+#toast{position:fixed; left:50%; bottom:calc(var(--tabh) + 16px); transform:translateX(-50%);
+  z-index:200; display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none;}
+.toast{background:#222c3a; color:#fff; padding:11px 18px; border-radius:999px; font-size:14px;
+  box-shadow:0 4px 18px rgba(0,0,0,.25); opacity:0; transform:translateY(10px); transition:.25s; max-width:90vw;}
+.toast.show{opacity:1; transform:translateY(0);}
+.toast.ok{background:var(--ok);} .toast.err{background:var(--err);} .toast.warn{background:var(--warn); color:#3a2c00;}
+
+/* ── modal ── */
+.modal-bg{position:fixed; inset:0; background:rgba(15,25,45,.55); z-index:150; display:flex;
+  align-items:flex-end; justify-content:center; padding:0;}
+.modal{background:#fff; width:100%; max-width:600px; border-radius:18px 18px 0 0; padding:18px;
+  max-height:88vh; overflow:auto; box-shadow:0 -6px 30px rgba(0,0,0,.25);}
+.modal h2{color:var(--blue-dark);}
+@media(min-width:600px){ .modal-bg{align-items:center;} .modal{border-radius:18px;} }
+
+/* ── สแกน ── */
+#scanWrap{position:relative; background:#000; border-radius:14px; overflow:hidden;}
+#scanVideo{width:100%; display:block; max-height:70vh; object-fit:cover;}
+#scanOverlay{position:absolute; inset:0; pointer-events:none;}
+.scan-hint{position:absolute; left:0; right:0; bottom:0; padding:10px 14px;
+  background:linear-gradient(transparent,rgba(0,0,0,.7)); color:#fff; font-size:14px;}
+.scan-status{position:absolute; top:10px; left:10px; right:10px; display:flex; gap:6px; flex-wrap:wrap;}
+.scan-status .pill{background:rgba(0,0,0,.55); color:#fff;}
+.scan-status .pill.on{background:var(--ok);}
+
+/* ── หน้ากระดาษพิมพ์ ── */
+#printArea{display:none;}
+.sheet-svg{ display:block; width:100%; height:auto; }   /* SVG ย่อพอดีความกว้างคอนเทนเนอร์เสมอ */
+@media print{
+  html,body{background:#fff; margin:0; padding:0;}
+  #app > *:not(#printArea){display:none !important;}
+  .tabbar,.appbar,#toast{display:none !important;}
+  #printArea{display:block;}
+  main{padding:0;}
+  /* ให้แต่ละแผ่นเต็มความกว้างพื้นที่พิมพ์ แล้วให้ SVG ย่อพอดี (fit-to-page) กันตกขอบ */
+  .sheet-page{ page-break-after:always; break-after:page; width:100%; height:auto;
+    display:flex; align-items:flex-start; justify-content:center; overflow:hidden; }
+  .sheet-page:last-child{ page-break-after:auto; break-after:auto; }
+  .sheet-svg{ width:100%; height:auto; max-height:100%; }
+  /* ระยะขอบเผื่อความปลอดภัย: แม้ผู้ใช้ตั้ง "ค่าเริ่มต้น" เนื้อหาก็ไม่ตกขอบ */
+  @page{ size:A4 portrait; margin:6mm; }
+}
+
+.empty{text-align:center; color:var(--muted); padding:30px 10px;}
+.empty .big{font-size:40px; opacity:.4; margin-bottom:6px;}
+.divider{height:1px; background:var(--line); margin:12px 0;}
+.chip{display:inline-block; padding:4px 10px; border-radius:8px; background:var(--blue-light);
+  color:var(--blue-dark); font-size:13px; font-weight:600; cursor:pointer; border:1.5px solid transparent;}
+.chip.sel{background:var(--blue); color:#fff;}
+.flaglist{font-size:13px; color:var(--err);}
+.mono{font-variant-numeric:tabular-nums;}
+.hlist{display:flex; gap:8px; overflow-x:auto; padding-bottom:4px;}
+.hlist .chip{white-space:nowrap;}
+progress{width:100%; height:10px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="appbar">
+    <span class="logo">📷 ScanDee</span>
+    <span class="sub">สแกนดี<br>ครูนนทพัทธ์ หิรัญเรือง</span>
+  </div>
+  <main id="view"><!-- render ที่นี่ --></main>
+
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="home"><span class="ic">🏠</span><span class="lb">หน้าหลัก</span></button>
+    <button data-tab="exams"><span class="ic">📝</span><span class="lb">ข้อสอบ</span></button>
+    <button data-tab="scan"><span class="ic">📷</span><span class="lb">สแกน</span></button>
+    <button data-tab="results"><span class="ic">📊</span><span class="lb">ผลคะแนน</span></button>
+    <button data-tab="settings"><span class="ic">⚙️</span><span class="lb">ตั้งค่า</span></button>
+  </nav>
+
+  <!-- พื้นที่พิมพ์กระดาษคำตอบ (ซ่อนจอ แสดงเฉพาะตอน print) -->
+  <div id="printArea"></div>
+</div>
+
+<div id="toast"></div>
+<div id="modalRoot"></div>
+
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════
+   ScanDee (สแกนดี) — ระบบตรวจกระดาษคำตอบ OMR ด้วยกล้องมือถือ
+   พัฒนาโดย ครูนนทพัทธ์ หิรัญเรือง
+   โครงสร้าง: Utils / Store / Layout / SheetGen / Scanner / Grader / UI / Router
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ─────────────────────────── Utils: ฟังก์ชันช่วยทั่วไป ─────────────────────────── */
+const Utils = {
+  // สร้าง id สุ่ม
+  uid(prefix='id'){ return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7); },
+  // แปลงเลขตัวเลือก index -> อักษรไทย (0=ก)
+  CHOICE_LABELS:['ก','ข','ค','ง','จ'],
+  choiceLabel(i){ return Utils.CHOICE_LABELS[i] ?? String(i+1); },
+  labelToIndex(ch){ return Utils.CHOICE_LABELS.indexOf(ch); },
+  // จัด format วันที่ YYYYMMDD
+  todayStr(){ const d=new Date(); const p=n=>String(n).padStart(2,'0');
+    return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}`; },
+  // escape html
+  esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
+  // clamp
+  clamp(v,a,b){ return Math.max(a,Math.min(b,v)); },
+  // ค่าเฉลี่ย/SD
+  mean(arr){ return arr.length? arr.reduce((a,b)=>a+b,0)/arr.length : 0; },
+  sd(arr){ if(arr.length<2) return 0; const m=Utils.mean(arr);
+    return Math.sqrt(arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length); },
+  // ดาวน์โหลดไฟล์ข้อความ
+  download(filename, text){
+    const blob=new Blob([text],{type:'application/json'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a');
+    a.href=url; a.download=filename; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },100);
+  },
+  // อ่านไฟล์ที่ผู้ใช้เลือก
+  readFile(file){ return new Promise((res,rej)=>{
+    const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsText(file);
+  });},
+  // toast แจ้งผล
+  toast(msg,type='',ms=2400){
+    const wrap=document.getElementById('toast');
+    const el=document.createElement('div'); el.className='toast '+type; el.textContent=msg;
+    wrap.appendChild(el); requestAnimationFrame(()=>el.classList.add('show'));
+    setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); }, ms);
+  },
+  vibrate(pattern){ if(navigator.vibrate) try{ navigator.vibrate(pattern); }catch(e){} },
+};
+
+/* ─────────────────────────── Store: state + localStorage ─────────────────────────── */
+const Store = {
+  KEY:'scandee_data_v1',
+  data:null,
+  // โครงสร้างข้อมูลเริ่มต้น
+  defaults(){ return {
+    settings:{ schoolName:'', teacherName:'ครูนนทพัทธ์ หิรัญเรือง', markThreshold:0.45, passScore:50 },
+    exams:[], students:[], results:[]
+  };},
+  // โหลดจาก localStorage
+  load(){
+    try{
+      const raw=localStorage.getItem(Store.KEY);
+      Store.data = raw? JSON.parse(raw) : Store.defaults();
+    }catch(e){ Store.data = Store.defaults(); }
+    // เติม field ที่ขาด
+    const d=Store.data, def=Store.defaults();
+    d.settings = Object.assign({}, def.settings, d.settings||{});
+    d.exams=d.exams||[]; d.students=d.students||[]; d.results=d.results||[];
+    return Store.data;
+  },
+  // บันทึกลง localStorage
+  save(){
+    try{ localStorage.setItem(Store.KEY, JSON.stringify(Store.data)); }
+    catch(e){ Utils.toast('บันทึกไม่สำเร็จ (พื้นที่เต็ม?)','err'); }
+  },
+  // helper เข้าถึงข้อมูล
+  get settings(){ return Store.data.settings; },
+  get exams(){ return Store.data.exams; },
+  get results(){ return Store.data.results; },
+  examById(id){ return Store.data.exams.find(e=>e.id===id); },
+  setInExam(exam, code){ return (exam.sets||[]).find(s=>s.setCode===code); },
+  resultsOfExam(id){ return Store.data.results.filter(r=>r.examId===id); },
+  // แทนที่ทั้ง data (ตอน import)
+  replaceAll(obj){ Store.data=obj; Store.save(); },
+};
+
+/* ─────────────────────────── Layout: สูตรตำแหน่ง bubble (แชร์ SheetGen + Scanner) ───────────────────────────
+   คำนวณตำแหน่งทุกอย่างเป็น mm บนกระดาษ A4 และให้พิกัด normalized (0..1)
+   ภายในกรอบสี่เหลี่ยมที่ล้อมด้วยจุดศูนย์กลาง fiducial 4 มุม
+   Scanner จะ rectify ภาพให้ตรงกับกรอบนี้แล้ว sample ที่ nx,ny เดียวกัน  */
+const Layout = {
+  A4:{ w:210, h:297 },
+  FID_SIZE:8,        // ขนาดสี่เหลี่ยม fiducial (mm)
+  FID_CENTER:14,     // ระยะจากขอบถึงจุดศูนย์กลาง fiducial (mm)
+  // กรอบอ้างอิง (จุดศูนย์กลาง fiducial 4 มุม)
+  rect(){ const c=Layout.FID_CENTER; return { x0:c, y0:c, x1:Layout.A4.w-c, y1:Layout.A4.h-c }; },
+  toNorm(xmm,ymm){ const r=Layout.rect(); return { nx:(xmm-r.x0)/(r.x1-r.x0), ny:(ymm-r.y0)/(r.y1-r.y0) }; },
+  // ตำแหน่ง fiducial 4 มุม (mm) + normalized(=มุมกรอบ)
+  fiducials(){ const r=Layout.rect(); return {
+    TL:{xmm:r.x0,ymm:r.y0,nx:0,ny:0}, TR:{xmm:r.x1,ymm:r.y0,nx:1,ny:0},
+    BL:{xmm:r.x0,ymm:r.y1,nx:0,ny:1}, BR:{xmm:r.x1,ymm:r.y1,nx:1,ny:1},
+  };},
+
+  // ── พารามิเตอร์ ช่องรหัสนักเรียน (ฝนเลข 0–9, 5 หลัก) — กล่องซ้าย ──
+  // เลข 0–9 เป็นป้ายกำกับด้านซ้าย (labelX) แถวละ 1 เลข, วง bubble 5 หลักเรียงเป็นคอลัมน์
+  ID_DIGITS:5, ID_ROWS:10,
+  idParams(){ return {
+    startX:40, colGap:8.5, top:62, rowGap:4.0, r:2.0, labelX:32,
+    headerY:54, colHeadY:58, boxX:26, boxY:51, boxW:56, boxH:53 }; },
+
+  // ── พารามิเตอร์ ตารางคำตอบ — กระจายคอลัมน์เต็มความกว้าง + จัดกึ่งกลางแนวตั้ง ──
+  ROWS_PER_COL:25,
+  ansLayout(numQuestions, numChoices){
+    const rect=Layout.rect();
+    const availTop=112, availBottom=278, availH=availBottom-availTop;  // เขตวางคำตอบ
+    const rectW=rect.x1-rect.x0;
+    // เลือกจำนวนคอลัมน์ให้ ≤25 แถว/คอลัมน์ และเต็มความกว้าง
+    const numCols = numQuestions<=12?1 : numQuestions<=50?2 : numQuestions<=75?3 : 4;
+    const rowsPerCol = Math.ceil(numQuestions/numCols);
+    const choiceGap=7.5, labelOffset=11;
+    const blockW = labelOffset + (numChoices-1)*choiceGap;         // ความกว้างเนื้อหา 1 คอลัมน์
+    const gap = (rectW - numCols*blockW)/(numCols+1);              // เว้นช่องเท่ากันแบบสมมาตร
+    const rowGap = Math.min(11, availH/rowsPerCol);                // ระยะแถว (ไม่ล้นลงล่าง)
+    const blockH = rowsPerCol*rowGap;
+    const startY = availTop + Math.max(0,(availH-blockH)/2);       // จัดกึ่งกลางแนวตั้ง
+    const r = Math.min(3.0, rowGap*0.4);                           // ขนาดวงตามระยะแถว
+    const colLeftX=[]; for(let i=0;i<numCols;i++) colLeftX.push(rect.x0 + gap*(i+1) + blockW*i);
+    return { numCols, rowsPerCol, choiceGap, labelOffset, blockW, gap, rowGap, blockH, startY, r,
+             colLeftX, availTop, availBottom };
+  },
+
+  // สร้าง layout เต็ม: {fiducials, idBubbles[], answers[], meta}
+  compute(numQuestions, numChoices){
+    const fid = Layout.fiducials();
+    const rct = Layout.rect();
+    // ── รหัสนักเรียน ──
+    const ip = Layout.idParams();
+    const idBubbles=[];
+    for(let col=0; col<Layout.ID_DIGITS; col++){
+      for(let dg=0; dg<Layout.ID_ROWS; dg++){
+        const xmm=ip.startX + col*ip.colGap;
+        const ymm=ip.top + dg*ip.rowGap;
+        const n=Layout.toNorm(xmm,ymm);
+        idBubbles.push({ col, digit:dg, xmm, ymm, nx:n.nx, ny:n.ny, r:ip.r });
+      }
+    }
+    // ── คำตอบ ──
+    const ap = Layout.ansLayout(numQuestions, numChoices);
+    const answers=[];
+    for(let q=0; q<numQuestions; q++){
+      const col=Math.floor(q/ap.rowsPerCol);
+      const row=q%ap.rowsPerCol;
+      const colLeft=ap.colLeftX[col];
+      const ymm=ap.startY + row*ap.rowGap + ap.rowGap/2;
+      for(let c=0;c<numChoices;c++){
+        const xmm=colLeft + ap.labelOffset + c*ap.choiceGap;
+        const n=Layout.toNorm(xmm,ymm);
+        answers.push({ q, c, xmm, ymm, nx:n.nx, ny:n.ny, r:ap.r });
+      }
+    }
+    return { fiducials:fid, idBubbles, answers,
+      meta:{ numQuestions, numChoices, numCols:ap.numCols, rect:rct, ansLayout:ap, idParams:ip } };
+  },
+};
+
+/* ─────────────────────────── SheetGen: สร้างกระดาษคำตอบ SVG A4 ─────────────────────────── */
+const SheetGen = {
+  // สร้าง QR เป็น data URL (PNG) ด้วย qrcode-generator
+  qrDataURL(text, cell=4){
+    const qr = qrcode(0,'M'); qr.addData(text); qr.make();
+    return qr.createDataURL(cell, 8);
+  },
+  // สร้าง SVG กระดาษคำตอบ 1 แผ่นสำหรับ exam+set
+  buildSheetSVG(exam, set){
+    const L = Layout.compute(exam.numQuestions, exam.numChoices);
+    const S = Store.settings;
+    const mm=v=>v; // ทำงานในหน่วย mm ตรง viewBox
+    const W=Layout.A4.w, H=Layout.A4.h, fs=Layout.FID_SIZE;
+    const ap=L.meta.ansLayout, rct=L.meta.rect, ip=L.meta.idParams;
+    // ข้อมูลใน QR
+    const qrPayload = JSON.stringify({
+      examId:exam.id, setCode:set.setCode,
+      layout:{ rows:ap.rowsPerCol, cols:ap.numCols, numChoices:exam.numChoices, numQuestions:exam.numQuestions }
+    });
+    const qrURL = SheetGen.qrDataURL(qrPayload, 4);
+
+    // ไม่กำหนดขนาดตายตัว (mm) — ใช้ viewBox + preserveAspectRatio ให้ย่อพอดีหน้าเสมอ กันเนื้อหาตกขอบตอนพิมพ์
+    let svg=`<svg class="sheet-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="background:#fff; display:block;">`;
+    svg+=`<rect x="0" y="0" width="${W}" height="${H}" fill="#fff"/>`;
+
+    // ── fiducial 4 มุม (สี่เหลี่ยมทึบดำ) ──
+    for(const k of ['TL','TR','BL','BR']){
+      const f=L.fiducials[k];
+      svg+=`<rect x="${f.xmm-fs/2}" y="${f.ymm-fs/2}" width="${fs}" height="${fs}" fill="#000"/>`;
+    }
+
+    // ── หัวกระดาษ ──
+    svg+=`<text x="${W/2}" y="21" text-anchor="middle" font-family="Prompt,Sarabun" font-size="6.4" font-weight="700" fill="#000">${Utils.esc(S.schoolName||'กระดาษคำตอบ ScanDee')}</text>`;
+    svg+=`<text x="${W/2}" y="28.5" text-anchor="middle" font-family="Sarabun" font-size="4" fill="#000">${Utils.esc(exam.name||'')} • วิชา ${Utils.esc(exam.subject||'-')} • ชั้น ${Utils.esc(exam.className||'-')}</text>`;
+    // กล่องชุดข้อสอบ (ซ้าย)
+    svg+=`<rect x="26" y="33" width="30" height="9.5" rx="1.5" fill="none" stroke="#000" stroke-width=".5"/>`;
+    svg+=`<text x="41" y="39.6" text-anchor="middle" font-family="Prompt" font-size="5" font-weight="700" fill="#000">ชุด ${Utils.esc(set.setCode)}</text>`;
+    // ช่องเขียนชื่อ (กลาง)
+    svg+=`<text x="62" y="37.5" font-family="Sarabun" font-size="3.6" fill="#000">ชื่อ-สกุล</text>`;
+    svg+=`<line x1="76" y1="38" x2="150" y2="38" stroke="#000" stroke-width=".35"/>`;
+    svg+=`<text x="62" y="43.5" font-family="Sarabun" font-size="3.6" fill="#000">คะแนน</text>`;
+    svg+=`<line x1="76" y1="44" x2="120" y2="44" stroke="#000" stroke-width=".35"/>`;
+
+    // ── QR มุมขวาบน (เว้นห่างจาก fiducial ไม่ให้ชนกัน, ข้อความไม่ล้นขอบ) ──
+    const qrSize=22, qrX=164, qrY=21;   // ขวาสุด 186 < fiducial (192)
+    svg+=`<rect x="${qrX-1.5}" y="${qrY-1.5}" width="${qrSize+3}" height="${qrSize+3}" rx="1.5" fill="#fff" stroke="#ddd" stroke-width=".3"/>`;
+    svg+=`<image href="${qrURL}" x="${qrX}" y="${qrY}" width="${qrSize}" height="${qrSize}" />`;
+    svg+=`<text x="${qrX+qrSize/2}" y="${qrY+qrSize+3}" text-anchor="middle" font-family="Sarabun" font-size="2.5" fill="#555">อย่าฝนทับบริเวณนี้</text>`;
+
+    // ── กล่องซ้าย: ช่องรหัสนักเรียน (ฝนเลข 0–9 จำนวน 5 หลัก) ──
+    svg+=`<rect x="${ip.boxX}" y="${ip.boxY}" width="${ip.boxW}" height="${ip.boxH}" rx="2" fill="none" stroke="#333" stroke-width=".45"/>`;
+    svg+=`<text x="${ip.boxX+ip.boxW/2}" y="${ip.headerY}" text-anchor="middle" font-family="Prompt" font-size="3.6" font-weight="600" fill="#000">รหัสนักเรียน (ฝนให้ตรงเลข)</text>`;
+    // หัวคอลัมน์ (หลักที่ 1–5)
+    for(let col=0; col<Layout.ID_DIGITS; col++){
+      const x=ip.startX+col*ip.colGap;
+      svg+=`<text x="${x}" y="${ip.colHeadY+1.4}" text-anchor="middle" font-family="Sarabun" font-size="2.6" font-weight="600" fill="#666">${col+1}</text>`;
+    }
+    // ป้ายเลข 0–9 ด้านซ้าย (แถวละ 1 เลข)
+    for(let dg=0; dg<Layout.ID_ROWS; dg++){
+      const y=ip.top+dg*ip.rowGap;
+      svg+=`<text x="${ip.labelX}" y="${y+1.1}" text-anchor="middle" font-family="Sarabun" font-size="2.9" fill="#000">${dg}</text>`;
+    }
+    // วง bubble (โปร่ง)
+    for(const b of L.idBubbles){
+      svg+=`<circle cx="${b.xmm}" cy="${b.ymm}" r="${b.r}" fill="none" stroke="#000" stroke-width=".35"/>`;
+    }
+
+    // ── กล่องขวา: คำแนะนำการทำ (ถ่วงให้สมมาตรกับกล่องรหัสฝั่งซ้าย) ──
+    const inX=ip.boxX+ip.boxW+6, inW=rct.x1-inX, inY=ip.boxY, inH=ip.boxH;
+    svg+=`<rect x="${inX}" y="${inY}" width="${inW}" height="${inH}" rx="2" fill="#f7f9fc" stroke="#333" stroke-width=".45"/>`;
+    svg+=`<text x="${inX+inW/2}" y="${inY+6}" text-anchor="middle" font-family="Prompt" font-size="3.6" font-weight="700" fill="#0d47a1">คำแนะนำการทำ</text>`;
+    const tips=['1. ใช้ดินสอ 2B ฝนให้ทึบเต็มวง','2. ฝนได้เพียง 1 ช่องต่อ 1 ข้อ','3. หากแก้ ให้ลบให้สะอาดก่อนฝนใหม่','4. ห้ามขีดเขียน/ทำสัญลักษณ์นอกวง','5. เก็บกระดาษให้เรียบ ไม่ยับ ไม่เปียก','6. อย่าให้ QR และมุมดำ 4 มุมชำรุด'];
+    tips.forEach((t,i)=>{ svg+=`<text x="${inX+5}" y="${inY+13+i*6}" font-family="Sarabun" font-size="3.05" fill="#222">${t}</text>`; });
+
+    // ── ตารางคำตอบ ──
+    svg+=`<text x="${W/2}" y="108" text-anchor="middle" font-family="Prompt" font-size="4" font-weight="600" fill="#000">ระบายคำตอบ (ฝนทึบวงเดียวต่อข้อ)</text>`;
+    // เลขข้อ + วง ก ข ค ง (จ)
+    const seen=new Set();
+    for(const a of L.answers){
+      if(!seen.has(a.q)){
+        seen.add(a.q);
+        const col=Math.floor(a.q/ap.rowsPerCol);
+        const colLeft=ap.colLeftX[col];
+        svg+=`<text x="${colLeft+ap.labelOffset-5}" y="${a.ymm+1.3}" text-anchor="end" font-family="Sarabun" font-size="3.3" font-weight="600" fill="#000">${a.q+1}</text>`;
+      }
+      svg+=`<circle cx="${a.xmm}" cy="${a.ymm}" r="${a.r}" fill="none" stroke="#000" stroke-width=".4"/>`;
+      svg+=`<text x="${a.xmm}" y="${a.ymm+1.15}" text-anchor="middle" font-family="Sarabun" font-size="3.1" fill="#444">${Utils.choiceLabel(a.c)}</text>`;
+    }
+    // เส้นคั่นระหว่างคอลัมน์คำตอบ (กึ่งกลางช่องว่าง)
+    for(let col=1; col<ap.numCols; col++){
+      const x=ap.colLeftX[col]-ap.gap/2;
+      svg+=`<line x1="${x}" y1="${ap.startY-3}" x2="${x}" y2="${ap.startY+ap.blockH+1}" stroke="#e0e0e0" stroke-width=".25"/>`;
+    }
+
+    // footer
+    svg+=`<text x="${W/2}" y="${H-6}" text-anchor="middle" font-family="Sarabun" font-size="2.8" fill="#777">ScanDee (สแกนดี) • พัฒนาโดย ครูนนทพัทธ์ หิรัญเรือง</text>`;
+    svg+=`</svg>`;
+    return svg;
+  },
+
+  // เตรียมหน้าพิมพ์: รับ list ของ {exam,set} แล้ววาดหลายหน้า
+  preparePrint(pages){
+    const area=document.getElementById('printArea');
+    area.innerHTML = pages.map(p=>`<div class="sheet-page">${SheetGen.buildSheetSVG(p.exam,p.set)}</div>`).join('');
+  },
+  printExamSets(exam, setCodes){
+    const pages=setCodes.map(code=>({ exam, set:Store.setInExam(exam,code) })).filter(p=>p.set);
+    if(!pages.length){ Utils.toast('ไม่มีชุดให้พิมพ์','err'); return; }
+    SheetGen.preparePrint(pages);
+    setTimeout(()=>window.print(), 200);
+  },
+};
+
+/* ─────────────────────────── Grader: ตรวจ/คิดคะแนน ─────────────────────────── */
+const Grader = {
+  // ตรวจคำตอบเทียบเฉลย -> {score,maxScore,correctFlags[]}
+  grade(exam, set, answers){
+    const key=set.answerKey||[];
+    const scores=set.scorePerItem||[];
+    let score=0, maxScore=0;
+    const perItem=[]; // true/false/null(ว่าง)
+    for(let q=0;q<exam.numQuestions;q++){
+      const pts = scores[q] ?? 1;
+      maxScore += pts;
+      const keyIdx = Utils.labelToIndex(key[q]);
+      const ans = answers[q]; // index หรือ -1(ว่าง) หรือ -2(ซ้ำ)
+      if(ans>=0 && ans===keyIdx){ score+=pts; perItem.push(true); }
+      else if(ans===-1||ans===-2){ perItem.push(null); }
+      else perItem.push(false);
+    }
+    return { score, maxScore, perItem };
+  },
+  // วิเคราะห์รายข้อจาก results: % ตอบถูกแต่ละข้อ
+  itemAnalysis(exam){
+    const rs=Store.resultsOfExam(exam.id);
+    const N=exam.numQuestions;
+    const correct=new Array(N).fill(0), answered=new Array(N).fill(0), total=rs.length;
+    for(const r of rs){
+      const set=Store.setInExam(exam, r.setCode); if(!set) continue;
+      const key=set.answerKey||[];
+      for(let q=0;q<N;q++){
+        const a=r.answers[q];
+        if(a>=0) answered[q]++;
+        if(a>=0 && a===Utils.labelToIndex(key[q])) correct[q]++;
+      }
+    }
+    return { total, correct, answered,
+      pct: correct.map((c,i)=> total? Math.round(c/total*100):0) };
+  },
+  // สถิติผลรวม
+  stats(exam){
+    const rs=Store.resultsOfExam(exam.id);
+    const scores=rs.map(r=>r.score);
+    const pass=Store.settings.passScore;
+    const maxScore = rs[0]? rs[0].maxScore : 0;
+    return {
+      n:rs.length,
+      max: scores.length? Math.max(...scores):0,
+      min: scores.length? Math.min(...scores):0,
+      avg: Utils.mean(scores),
+      sd: Utils.sd(scores),
+      passCount: rs.filter(r=> (r.maxScore? r.score/r.maxScore*100:0) >= pass).length,
+      maxScore,
+    };
+  },
+};
+
+/* ─────────────────────────── ExcelIO: นำเข้า/ส่งออก .xlsx (SheetJS) ─────────────────────────── */
+const ExcelIO = {
+  ready(){ return typeof XLSX!=='undefined'; },
+  // แปลงข้อความตัวเลือกเป็นอักษรไทย (รองรับ ก-จ, 1-5, a-e)
+  normAns(v){
+    let t=String(v==null?'':v).trim(); if(!t) return '';
+    const map={'1':'ก','2':'ข','3':'ค','4':'ง','5':'จ','a':'ก','b':'ข','c':'ค','d':'ง','e':'จ','A':'ก','B':'ข','C':'ค','D':'ง','E':'จ'};
+    if(map[t]) t=map[t];
+    return Utils.CHOICE_LABELS.includes(t)? t : '';
+  },
+  // ── ดาวน์โหลดเทมเพลตข้อสอบ ──
+  downloadExamTemplate(){
+    if(!ExcelIO.ready()){ Utils.toast('โหลดไลบรารี Excel ไม่สำเร็จ','err'); return; }
+    const rows=[
+      ['ชื่อข้อสอบ','สอบกลางภาค 1/2568','วิชา','ภาษาไทย','ชั้น','ม.1','จำนวนตัวเลือก',5],
+      [],
+      ['ข้อ','ชุด A','ชุด B','คะแนน'],
+    ];
+    // ตัวอย่าง 10 ข้อ
+    const demoA=['ก','ข','ค','ง','จ','ก','ข','ค','ง','จ'];
+    const demoB=['จ','ง','ค','ข','ก','จ','ง','ค','ข','ก'];
+    for(let i=0;i<10;i++) rows.push([i+1, demoA[i], demoB[i], 1]);
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols']=[{wch:10},{wch:10},{wch:10},{wch:8}];
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'ScanDee');
+    XLSX.writeFile(wb,'scandee_exam_template.xlsx');
+    Utils.toast('ดาวน์โหลดเทมเพลตแล้ว','ok');
+  },
+  // ── นำเข้าข้อสอบจากไฟล์ ──
+  async importExam(file){
+    if(!ExcelIO.ready()) throw new Error('ไลบรารี Excel ยังไม่พร้อม');
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+    // ── อ่าน meta (หาป้ายกำกับที่ใดก็ได้ในไม่กี่แถวแรก) ──
+    const findVal=(label)=>{
+      for(const row of aoa) for(let c=0;c<row.length;c++){
+        if(String(row[c]).trim()===label) return row[c+1];
+      }
+      return '';
+    };
+    const name=String(findVal('ชื่อข้อสอบ')||'').trim();
+    const subject=String(findVal('วิชา')||'').trim();
+    const className=String(findVal('ชั้น')||'').trim();
+    let ncMeta=parseInt(findVal('จำนวนตัวเลือก'))||0;
+    // ── หาแถวหัวตาราง (มีเซลล์ "ข้อ") ──
+    let hr=-1;
+    for(let r=0;r<aoa.length;r++){
+      if(aoa[r].some(c=>{ const t=String(c).trim(); return t==='ข้อ'||t==='ข้อที่'||t.toLowerCase()==='no'; })){ hr=r; break; }
+    }
+    if(hr<0) throw new Error('ไม่พบหัวตาราง "ข้อ" ในไฟล์');
+    const header=aoa[hr].map(c=>String(c).trim());
+    const qCol=header.findIndex(c=>c==='ข้อ'||c==='ข้อที่'||c.toLowerCase()==='no');
+    const scoreCol=header.findIndex(c=>/^(คะแนน|score)$/i.test(c));
+    // คอลัมน์เฉลย: ขึ้นต้นด้วย "เฉลย" หรือ "ชุด"
+    const setCols=[];
+    header.forEach((c,i)=>{
+      const m=c.match(/^(?:เฉลย|ชุด)\s*(.*)$/);
+      if(m){ let code=(m[1]||'').trim().toUpperCase(); if(!code) code=String.fromCharCode(65+setCols.length); setCols.push({idx:i,code}); }
+    });
+    if(!setCols.length) throw new Error('ไม่พบคอลัมน์เฉลย (เช่น "ชุด A")');
+    // ── อ่านข้อมูลรายข้อ ──
+    const dataRows=[];
+    for(let r=hr+1;r<aoa.length;r++){
+      const qn=parseInt(aoa[r][qCol]);
+      if(qn>=1) dataRows.push(aoa[r]);
+    }
+    if(!dataRows.length) throw new Error('ไม่พบข้อมูลข้อสอบใต้หัวตาราง');
+    let nq=Utils.clamp(dataRows.length,10,100);
+    // ── สร้างชุด ──
+    let maxIdx=3;
+    const sets=setCols.map(sc=>{
+      const answerKey=[], scorePerItem=[];
+      dataRows.forEach(row=>{
+        const a=ExcelIO.normAns(row[sc.idx]); answerKey.push(a);
+        const idx=Utils.labelToIndex(a); if(idx>maxIdx) maxIdx=idx;
+        let s=scoreCol>=0? parseFloat(row[scoreCol]) : 1; if(!(s>0)) s=1; scorePerItem.push(s);
+      });
+      return { setCode:sc.code, answerKey:UI._resize(answerKey,nq,''), scorePerItem:UI._resize(scorePerItem,nq,1) };
+    });
+    let nc=ncMeta|| (maxIdx+1); nc=Utils.clamp(nc,4,5);
+    return { id:Utils.uid('ex'), name:name||('นำเข้า '+Utils.todayStr()),
+      subject, className, date:'', numQuestions:nq, numChoices:nc, sets };
+  },
+  // ── ส่งออกผลคะแนนเป็น .xlsx (3 ชีต: ผล/สถิติ/วิเคราะห์รายข้อ) ──
+  exportResults(examId){
+    if(!ExcelIO.ready()){ Utils.toast('โหลดไลบรารี Excel ไม่สำเร็จ','err'); return; }
+    const e=Store.examById(examId); const rs=Store.resultsOfExam(examId);
+    if(!rs.length){ Utils.toast('ยังไม่มีผลให้ส่งออก','warn'); return; }
+    const pass=Store.settings.passScore;
+    const wb=XLSX.utils.book_new();
+    // ชีต 1: ผลคะแนน
+    const head=['รหัสนักเรียน','ชุด','คะแนน','เต็ม','ร้อยละ','ผล'];
+    for(let q=0;q<e.numQuestions;q++) head.push('ข้อ'+(q+1));
+    const r1=[head];
+    [...rs].sort((a,b)=>b.score-a.score).forEach(r=>{
+      const pct=r.maxScore? Math.round(r.score/r.maxScore*100):0;
+      const row=[r.studentCode, r.setCode, r.score, r.maxScore, pct, pct>=pass?'ผ่าน':'ไม่ผ่าน'];
+      for(let q=0;q<e.numQuestions;q++){ const a=r.answers[q]; row.push(a>=0?Utils.choiceLabel(a):(a===-2?'ซ้ำ':'-')); }
+      r1.push(row);
+    });
+    const ws1=XLSX.utils.aoa_to_sheet(r1);
+    XLSX.utils.book_append_sheet(wb,ws1,'ผลคะแนน');
+    // ชีต 2: สถิติ
+    const st=Grader.stats(e);
+    const ws2=XLSX.utils.aoa_to_sheet([
+      ['ข้อสอบ', e.name],['วิชา', e.subject||'-'],['ชั้น', e.className||'-'],[],
+      ['จำนวนผู้สอบ', st.n],['คะแนนเต็ม', st.maxScore],
+      ['เฉลี่ย', +st.avg.toFixed(2)],['สูงสุด', st.max],['ต่ำสุด', st.min],
+      ['ส่วนเบี่ยงเบนมาตรฐาน (SD)', +st.sd.toFixed(2)],
+      ['ผ่านเกณฑ์ (≥'+pass+'%)', st.passCount],['อัตราผ่าน (%)', st.n?Math.round(st.passCount/st.n*100):0],
+    ]);
+    XLSX.utils.book_append_sheet(wb,ws2,'สถิติ');
+    // ชีต 3: วิเคราะห์รายข้อ
+    const ia=Grader.itemAnalysis(e); const set0=e.sets[0];
+    const r3=[['ข้อ','เฉลย','ตอบถูก','ตอบทั้งหมด','ร้อยละถูก','ระดับความยาก']];
+    for(let q=0;q<e.numQuestions;q++){
+      const p=ia.pct[q];
+      const level = p>=70?'ง่าย' : p>=40?'ปานกลาง' : 'ยาก';
+      r3.push([q+1, set0?set0.answerKey[q]:'', ia.correct[q], ia.total, p, level]);
+    }
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(r3),'วิเคราะห์รายข้อ');
+    XLSX.writeFile(wb,`scandee_results_${Utils.todayStr()}.xlsx`);
+    Utils.toast('ส่งออก Excel แล้ว','ok');
+  },
+};
+
+/* ─────────────────────────── Scanner: กล้อง + OMR (Canvas ล้วน) ─────────────────────────── */
+const Scanner = {
+  stream:null, video:null, raf:null, timer:null,
+  running:false, work:null, wctx:null,
+  lastResult:null, stableCount:0, lastSignature:'',
+  currentExam:null, currentLayout:null,
+  onResult:null,  // callback เมื่อผลนิ่ง
+
+  // เริ่มกล้อง
+  async start(videoEl, overlayEl){
+    Scanner.video=videoEl; Scanner.overlay=overlayEl;
+    Scanner.work=document.createElement('canvas'); Scanner.wctx=Scanner.work.getContext('2d',{willReadFrequently:true});
+    try{
+      Scanner.stream=await navigator.mediaDevices.getUserMedia({
+        video:{ facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:1707} }, audio:false
+      });
+    }catch(e){
+      Utils.toast('เปิดกล้องไม่ได้: '+e.message,'err',3500); return false;
+    }
+    videoEl.srcObject=Scanner.stream;
+    await videoEl.play().catch(()=>{});
+    Scanner.running=true; Scanner.stableCount=0; Scanner.lastSignature='';
+    Scanner.loop();
+    return true;
+  },
+  stop(){
+    Scanner.running=false;
+    if(Scanner.timer){ clearTimeout(Scanner.timer); Scanner.timer=null; }
+    if(Scanner.raf){ cancelAnimationFrame(Scanner.raf); Scanner.raf=null; }
+    if(Scanner.stream){ Scanner.stream.getTracks().forEach(t=>t.stop()); Scanner.stream=null; }
+    if(Scanner.video) Scanner.video.srcObject=null;
+  },
+  // วนอ่านทุก ~300ms
+  loop(){
+    if(!Scanner.running) return;
+    Scanner.processFrame();
+    Scanner.timer=setTimeout(()=>Scanner.loop(), 300);
+  },
+
+  // ── ประมวลผล 1 เฟรม ──
+  processFrame(){
+    const v=Scanner.video;
+    if(!v || v.videoWidth===0){ return; }
+    const w=v.videoWidth, h=v.videoHeight;
+    const cn=Scanner.work; cn.width=w; cn.height=h;
+    const ctx=Scanner.wctx;
+    ctx.drawImage(v,0,0,w,h);
+    let img;
+    try{ img=ctx.getImageData(0,0,w,h); }catch(e){ return; }
+
+    // a) อ่าน QR
+    let qr=null;
+    try{ qr=jsQR(img.data, w, h, {inversionAttempts:'dontInvert'}); }catch(e){}
+    const state={ qr:false, fid:false, read:false };
+    let payload=null;
+    if(qr && qr.data){
+      try{ payload=JSON.parse(qr.data); state.qr=true; }catch(e){}
+    }
+    // อัพเดตสถานะ
+    if(!payload){ Scanner.updateStatus(state,'เล็งให้เห็น QR code มุมขวาบน'); Scanner.stableCount=0; return; }
+
+    // โหลด exam ตาม payload
+    const exam=Store.examById(payload.examId);
+    if(!exam){ Scanner.updateStatus(state,'ไม่พบข้อสอบนี้ในเครื่อง (QR ไม่ตรง)'); return; }
+    const set=Store.setInExam(exam, payload.setCode) || (exam.sets&&exam.sets[0]);
+    Scanner.currentExam=exam; Scanner.currentSet=set;
+    const L=Layout.compute(exam.numQuestions, exam.numChoices);
+
+    // b) หา fiducial 4 มุม
+    const fids=Scanner.detectFiducials(img, w, h);
+    if(!fids){ Scanner.updateStatus(state,'จัดกระดาษให้เห็นสี่เหลี่ยมดำครบ 4 มุม'); Scanner.stableCount=0; return; }
+    state.fid=true;
+
+    // c) homography: map กรอบ rectified (มุม fiducial) -> ตำแหน่งในภาพ
+    const RW=700, RH=Math.round(700*(L.meta.rect.y1-L.meta.rect.y0)/(L.meta.rect.x1-L.meta.rect.x0));
+    // จุดต้นทาง (rectified) = มุมกรอบ, ปลายทาง = fiducial ที่ตรวจพบ
+    const src=[ {x:0,y:0}, {x:RW,y:0}, {x:RW,y:RH}, {x:0,y:RH} ];
+    const dst=[ fids.TL, fids.TR, fids.BR, fids.BL ];
+    const Hm=Scanner.homography(src,dst);
+    if(!Hm){ Scanner.updateStatus(state,'คำนวณมุมภาพไม่ได้ ลองจัดใหม่'); return; }
+
+    // d) sample bubble แต่ละจุด
+    const gray=Scanner.toGray(img, w, h);
+    const sample=(nx,ny,rmm)=>{
+      // แปลง norm -> พิกัด rectified -> พิกัดภาพ (ผ่าน H) แล้วเฉลี่ยความเข้ม
+      const rx=nx*RW, ry=ny*RH;
+      const rp=Scanner.applyH(Hm, rx, ry);
+      const rpix = Math.max(3, rmm/(L.meta.rect.x1-L.meta.rect.x0)*RW * (w/RW) * 0.55);
+      let sum=0,cnt=0;
+      const steps=4;
+      for(let dy=-steps;dy<=steps;dy++){
+        for(let dx=-steps;dx<=steps;dx++){
+          const rrx=rx+dx*(rmm/(L.meta.rect.x1-L.meta.rect.x0)*RW/steps);
+          const rry=ry+dy*(rmm/(L.meta.rect.x1-L.meta.rect.x0)*RW/steps);
+          if(dx*dx+dy*dy > steps*steps) continue;
+          const p=Scanner.applyH(Hm, rrx, rry);
+          const xi=Math.round(p.x), yi=Math.round(p.y);
+          if(xi<0||yi<0||xi>=w||yi>=h) continue;
+          sum+=gray[yi*w+xi]; cnt++;
+        }
+      }
+      return cnt? sum/cnt : 255;
+    };
+
+    // ประเมิน darkness ของทุก bubble คำตอบ + รหัส
+    const thr=Store.settings.markThreshold;
+    // รหัสนักเรียน
+    const idDark=[]; // [col][digit]
+    for(let col=0; col<Layout.ID_DIGITS; col++) idDark.push(new Array(Layout.ID_ROWS).fill(255));
+    for(const b of L.idBubbles){ idDark[b.col][b.digit]=sample(b.nx,b.ny,b.r); }
+    // คำตอบ
+    const ansDark=[]; // [q][c]
+    for(let q=0;q<exam.numQuestions;q++) ansDark.push(new Array(exam.numChoices).fill(255));
+    for(const a of L.answers){ ansDark[a.q][a.c]=sample(a.nx,a.ny,a.r); }
+
+    // ── ตัดสินฝน/ไม่ฝน: darkness ratio = (255-val)/255 ──
+    const decide=(darks)=>{
+      const ratios=darks.map(v=>(255-v)/255);
+      const marked=[]; ratios.forEach((r,i)=>{ if(r>=thr) marked.push(i); });
+      // เผื่อ threshold ต่ำ: เอาตัวเข้มสุดถ้าห่างชัด
+      return { marked, ratios };
+    };
+
+    // ถอดรหัสนักเรียน
+    let studentCode=''; const idFlags=[];
+    for(let col=0; col<Layout.ID_DIGITS; col++){
+      const d=decide(idDark[col]);
+      if(d.marked.length===1) studentCode+=String(d.marked[0]);
+      else if(d.marked.length===0){ studentCode+='_'; idFlags.push(col); }
+      else { // เลือกตัวเข้มสุด แต่ flag
+        let best=0; for(let k=1;k<d.ratios.length;k++) if(d.ratios[k]>d.ratios[best]) best=k;
+        studentCode+=String(best); idFlags.push(col);
+      }
+    }
+
+    // ถอดคำตอบ + QC flags
+    const answers=[]; const flags=[];
+    for(let q=0;q<exam.numQuestions;q++){
+      const d=decide(ansDark[q]);
+      if(d.marked.length===1) answers.push(d.marked[0]);
+      else if(d.marked.length===0){ answers.push(-1); flags.push({q, type:'blank'}); }
+      else { answers.push(-2); flags.push({q, type:'multi', choices:d.marked.slice()}); }
+    }
+    if(idFlags.length) flags.push({q:-1, type:'id', cols:idFlags});
+
+    state.read=true;
+    // e) ตรวจความนิ่ง: signature = studentCode + คำตอบ
+    const sig = studentCode+'|'+answers.join(',');
+    if(sig===Scanner.lastSignature){ Scanner.stableCount++; }
+    else { Scanner.stableCount=1; Scanner.lastSignature=sig; }
+
+    const grade=Grader.grade(exam,set,answers);
+    Scanner.lastResult={ exam, set, studentCode, answers, flags,
+      score:grade.score, maxScore:grade.maxScore, perItem:grade.perItem, layout:L };
+
+    Scanner.drawOverlay(fids, w, h);
+    Scanner.updateStatus(state, `อ่านได้ • รหัส ${studentCode} • ${grade.score}/${grade.maxScore} คะแนน` + (Scanner.stableCount>=2?' ✓ นิ่งแล้ว':' (ถือนิ่ง…)'));
+
+    // นิ่ง 2 เฟรมติด -> เด้งยืนยัน
+    if(Scanner.stableCount>=2 && Scanner.onResult){
+      Utils.vibrate([120,60,120]);
+      const r=Scanner.lastResult; Scanner.pause();
+      Scanner.onResult(r);
+    }
+  },
+  pause(){ Scanner.running=false; if(Scanner.timer){clearTimeout(Scanner.timer);Scanner.timer=null;} },
+  resume(){ if(!Scanner.running && Scanner.stream){ Scanner.running=true; Scanner.stableCount=0; Scanner.lastSignature=''; Scanner.loop(); } },
+
+  // แปลงเป็น grayscale array (Uint8)
+  toGray(img, w, h){
+    const d=img.data, g=new Uint8ClampedArray(w*h);
+    for(let i=0,j=0;i<d.length;i+=4,j++){
+      g[j]=(d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114)|0;
+    }
+    return g;
+  },
+
+  // ── ตรวจหา fiducial 4 มุม ──
+  // วิธี: ย่อภาพ, binarize (mean threshold), connected components (BFS),
+  //       กรอง blob ตามขนาด+ความเป็นสี่เหลี่ยมทึบ, เลือกตัวใกล้ 4 มุมภาพสุด
+  detectFiducials(img, W, H){
+    const scale = Math.min(1, 320/W);
+    const sw=Math.max(60,Math.round(W*scale)), sh=Math.round(H*scale);
+    // ย่อ + grayscale
+    const tmp=document.createElement('canvas'); tmp.width=sw; tmp.height=sh;
+    const tctx=tmp.getContext('2d',{willReadFrequently:true});
+    // วาดจาก work canvas (มี frame อยู่แล้ว)
+    tctx.drawImage(Scanner.work,0,0,sw,sh);
+    const sd=tctx.getImageData(0,0,sw,sh).data;
+    const gray=new Uint8Array(sw*sh);
+    let sum=0;
+    for(let i=0,j=0;i<sd.length;i+=4,j++){ const g=(sd[i]*0.299+sd[i+1]*0.587+sd[i+2]*0.114)|0; gray[j]=g; sum+=g; }
+    const meanV=sum/(sw*sh);
+    const thr=Math.max(60, meanV*0.55); // ดำ = ต่ำกว่านี้
+    const bin=new Uint8Array(sw*sh);
+    for(let i=0;i<gray.length;i++) bin[i]=gray[i]<thr?1:0;
+
+    // connected components (BFS) หา blob ดำ
+    const label=new Int32Array(sw*sh).fill(0);
+    const blobs=[]; let cur=0;
+    const stack=new Int32Array(sw*sh);
+    for(let y=0;y<sh;y++){
+      for(let x=0;x<sw;x++){
+        const idx=y*sw+x;
+        if(bin[idx]!==1 || label[idx]!==0) continue;
+        cur++; let sp=0; stack[sp++]=idx; label[idx]=cur;
+        let minx=x,maxx=x,miny=y,maxy=y,cnt=0,sx=0,sy=0;
+        while(sp>0){
+          const p=stack[--sp]; const py=(p/sw)|0, px=p-py*sw;
+          cnt++; sx+=px; sy+=py;
+          if(px<minx)minx=px; if(px>maxx)maxx=px; if(py<miny)miny=py; if(py>maxy)maxy=py;
+          // 4-neighbour
+          if(px>0){const n=p-1; if(bin[n]===1&&label[n]===0){label[n]=cur;stack[sp++]=n;}}
+          if(px<sw-1){const n=p+1; if(bin[n]===1&&label[n]===0){label[n]=cur;stack[sp++]=n;}}
+          if(py>0){const n=p-sw; if(bin[n]===1&&label[n]===0){label[n]=cur;stack[sp++]=n;}}
+          if(py<sh-1){const n=p+sw; if(bin[n]===1&&label[n]===0){label[n]=cur;stack[sp++]=n;}}
+          if(cnt>sw*sh*0.25) break; // กัน blob ใหญ่เกิน (พื้นดำ)
+        }
+        const bw=maxx-minx+1, bh=maxy-miny+1;
+        const area=cnt, box=bw*bh;
+        const fill=area/box;                  // ความทึบ
+        const aspect=bw/bh;
+        const relSize=Math.max(bw,bh)/sw;      // ขนาดเทียบกว้างภาพ
+        // fiducial: เกือบสี่เหลี่ยม, ทึบ, ขนาดพอเหมาะ
+        if(fill>0.62 && aspect>0.55 && aspect<1.8 && relSize>0.02 && relSize<0.14 && area>20){
+          blobs.push({ cx:sx/cnt, cy:sy/cnt, area, bw, bh, fill });
+        }
+      }
+    }
+    if(blobs.length<4) return null;
+
+    // เลือก blob ที่ใกล้ 4 มุมภาพที่สุด
+    const corners={ TL:{x:0,y:0}, TR:{x:sw,y:0}, BR:{x:sw,y:sh}, BL:{x:0,y:sh} };
+    const pick={};
+    const used=new Set();
+    for(const k of ['TL','TR','BR','BL']){
+      let best=null, bd=Infinity, bi=-1;
+      blobs.forEach((b,i)=>{
+        if(used.has(i)) return;
+        const d=(b.cx-corners[k].x)**2 + (b.cy-corners[k].y)**2;
+        if(d<bd){ bd=d; best=b; bi=i; }
+      });
+      if(!best) return null;
+      used.add(bi);
+      // ต้องอยู่ในโซนมุมนั้นพอสมควร (ครึ่งภาพ)
+      pick[k]={ x:best.cx/scale, y:best.cy/scale };
+    }
+    // ตรวจว่าเรียงเป็นสี่เหลี่ยม (TL ซ้ายกว่า TR, บนกว่า BL)
+    if(!(pick.TL.x < pick.TR.x && pick.BL.x < pick.BR.x &&
+         pick.TL.y < pick.BL.y && pick.TR.y < pick.BR.y)) return null;
+    return pick;
+  },
+
+  // ── homography 4 จุด: หา H ที่ map src -> dst (แก้ระบบ 8x8) ──
+  homography(src, dst){
+    // สร้างสมการ A h = b ; h = [a,b,c,d,e,f,g,h] (h33=1)
+    const A=[], b=[];
+    for(let i=0;i<4;i++){
+      const {x:X,y:Y}=src[i], {x:u,y:v}=dst[i];
+      A.push([X,Y,1,0,0,0,-u*X,-u*Y]); b.push(u);
+      A.push([0,0,0,X,Y,1,-v*X,-v*Y]); b.push(v);
+    }
+    const h=Scanner.solveLinear(A,b);
+    if(!h) return null;
+    return [ [h[0],h[1],h[2]], [h[3],h[4],h[5]], [h[6],h[7],1] ];
+  },
+  applyH(H,x,y){
+    const w=H[2][0]*x+H[2][1]*y+H[2][2];
+    return { x:(H[0][0]*x+H[0][1]*y+H[0][2])/w, y:(H[1][0]*x+H[1][1]*y+H[1][2])/w };
+  },
+  // แก้ระบบสมการเชิงเส้น Ax=b ด้วย Gaussian elimination + partial pivot
+  solveLinear(A,b){
+    const n=b.length;
+    const M=A.map((r,i)=>r.concat([b[i]]));
+    for(let col=0; col<n; col++){
+      // pivot
+      let piv=col; for(let r=col+1;r<n;r++) if(Math.abs(M[r][col])>Math.abs(M[piv][col])) piv=r;
+      if(Math.abs(M[piv][col])<1e-9) return null;
+      [M[col],M[piv]]=[M[piv],M[col]];
+      const pv=M[col][col];
+      for(let j=col;j<=n;j++) M[col][j]/=pv;
+      for(let r=0;r<n;r++){ if(r===col) continue; const f=M[r][col];
+        if(f===0) continue; for(let j=col;j<=n;j++) M[r][j]-=f*M[col][j]; }
+    }
+    return M.map(r=>r[n]);
+  },
+
+  // ── overlay: วาดกรอบ fiducial ที่พบ ──
+  drawOverlay(fids, w, h){
+    const ov=Scanner.overlay; if(!ov) return;
+    const rect=Scanner.video.getBoundingClientRect();
+    ov.width=rect.width; ov.height=rect.height;
+    const sx=rect.width/w, sy=rect.height/h;
+    const c=ov.getContext('2d'); c.clearRect(0,0,ov.width,ov.height);
+    c.strokeStyle='#2e9e5b'; c.lineWidth=3; c.beginPath();
+    const order=['TL','TR','BR','BL'];
+    order.forEach((k,i)=>{ const p=fids[k]; const X=p.x*sx, Y=p.y*sy; i?c.lineTo(X,Y):c.moveTo(X,Y); });
+    c.closePath(); c.stroke();
+    order.forEach(k=>{ const p=fids[k]; c.fillStyle='#2e9e5b'; c.beginPath(); c.arc(p.x*sx,p.y*sy,6,0,7); c.fill(); });
+  },
+  updateStatus(state,msg){
+    const el=document.getElementById('scanStatus'); if(!el) return;
+    el.innerHTML =
+      `<span class="pill ${state.qr?'on':''}">QR</span>`+
+      `<span class="pill ${state.fid?'on':''}">4 มุม</span>`+
+      `<span class="pill ${state.read?'on':''}">อ่านค่า</span>`;
+    const h=document.getElementById('scanHint'); if(h) h.textContent=msg;
+  },
+};
+
+/* ─────────────────────────── UI: render แต่ละหน้า ─────────────────────────── */
+const UI = {
+  el(){ return document.getElementById('view'); },
+  setTab(tab){
+    document.querySelectorAll('.tabbar button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  },
+
+  // ════════ หน้าหลัก ════════
+  home(){
+    const S=Store.settings, ex=Store.exams, rs=Store.results;
+    const recent=[...rs].sort((a,b)=>b.timestamp-a.timestamp).slice(0,6);
+    let html=`
+    <div class="card" style="background:linear-gradient(135deg,var(--blue),var(--blue-dark)); color:#fff; border:none;">
+      <div class="spread">
+        <div>
+          <h2 style="color:#fff; margin:0;">สวัสดีครับ 👋</h2>
+          <div style="opacity:.9; font-size:14px;">${Utils.esc(S.schoolName||'ยังไม่ตั้งชื่อโรงเรียน')}</div>
+        </div>
+        <div style="font-size:40px;">📷</div>
+      </div>
+      <button class="btn lg block ok" style="margin-top:14px;" onclick="Router.go('scan')">📷 สแกนเลย</button>
+    </div>
+    <div class="grid3">
+      <div class="stat"><div class="v">${ex.length}</div><div class="k">ข้อสอบ</div></div>
+      <div class="stat"><div class="v">${rs.length}</div><div class="k">ผลที่ตรวจ</div></div>
+      <div class="stat"><div class="v">${Store.data.students.length}</div><div class="k">นักเรียน</div></div>
+    </div>`;
+
+    html+=`<div class="card"><div class="spread"><h3>ผลล่าสุด</h3>
+      <button class="btn sm ghost" onclick="Router.go('results')">ดูทั้งหมด</button></div>`;
+    if(!recent.length){ html+=`<div class="empty"><div class="big">📊</div>ยังไม่มีผลการตรวจ</div>`; }
+    else{
+      html+=`<div class="scroll-x"><table class="tbl"><thead><tr><th>รหัส</th><th>ข้อสอบ</th><th>ชุด</th><th class="num">คะแนน</th></tr></thead><tbody>`;
+      for(const r of recent){
+        const e=Store.examById(r.examId);
+        html+=`<tr onclick="Router.go('results','${r.examId}')"><td class="mono">${Utils.esc(r.studentCode)}</td>
+          <td>${Utils.esc(e?e.name:'-')}</td><td>${Utils.esc(r.setCode)}</td>
+          <td class="num"><b>${r.score}</b>/${r.maxScore}</td></tr>`;
+      }
+      html+=`</tbody></table></div>`;
+    }
+    html+=`</div>`;
+
+    html+=`<div class="card"><h3>เริ่มต้นใช้งาน</h3>
+      <ol class="muted" style="padding-left:20px; margin:6px 0;">
+        <li>สร้าง <b>ข้อสอบ</b> และกำหนดเฉลยแต่ละชุด</li>
+        <li><b>พิมพ์กระดาษคำตอบ</b> แจกนักเรียน</li>
+        <li>เปิด <b>สแกน</b> เล็งกล้องให้เห็น QR + 4 มุม</li>
+        <li>ดู <b>ผลคะแนน</b> และสถิติ</li>
+      </ol></div>`;
+    UI.el().innerHTML=html;
+  },
+
+  // ════════ หน้าข้อสอบ (list) ════════
+  exams(){
+    const ex=Store.exams;
+    let html=`<div class="spread" style="margin-bottom:10px;"><h2>ข้อสอบ</h2>
+      <div class="row" style="gap:6px;">
+        <button class="btn ghost sm" onclick="UI.importExamXlsx()">⬆️ Excel</button>
+        <button class="btn sm" onclick="UI.editExam()">+ สร้าง</button>
+      </div></div>
+      <div class="card" style="padding:10px 14px; background:var(--blue-light); border:none;">
+        <div class="spread"><div class="muted" style="color:var(--blue-dark);">📥 นำเข้าข้อสอบ+เฉลยจากไฟล์ Excel (.xlsx)</div>
+        <button class="btn gray sm" onclick="ExcelIO.downloadExamTemplate()">เทมเพลต</button></div>
+      </div>`;
+    if(!ex.length){ html+=`<div class="card"><div class="empty"><div class="big">📝</div>ยังไม่มีข้อสอบ<br><button class="btn ghost" style="margin-top:12px;" onclick="UI.editExam()">+ สร้างข้อสอบแรก</button></div></div>`; }
+    for(const e of ex){
+      const nSets=(e.sets||[]).length, nRes=Store.resultsOfExam(e.id).length;
+      html+=`<div class="card">
+        <div class="spread"><div>
+          <h3 style="margin:0;">${Utils.esc(e.name)}</h3>
+          <div class="muted">${Utils.esc(e.subject||'-')} • ชั้น ${Utils.esc(e.className||'-')} • ${Utils.esc(e.date||'')}</div>
+        </div><span class="pill blue">${e.numQuestions} ข้อ</span></div>
+        <div class="row wrap" style="margin-top:8px;">
+          <span class="pill gray">${e.numChoices} ตัวเลือก</span>
+          <span class="pill gray">${nSets} ชุด</span>
+          <span class="pill ${nRes?'ok':'gray'}">${nRes} ผล</span>
+        </div>
+        <div class="divider"></div>
+        <div class="grid2">
+          <button class="btn ghost sm" onclick="UI.manageSets('${e.id}')">🔑 เฉลย/ชุด</button>
+          <button class="btn ghost sm" onclick="UI.printDialog('${e.id}')">🖨️ พิมพ์กระดาษ</button>
+          <button class="btn gray sm" onclick="UI.editExam('${e.id}')">✏️ แก้ไข</button>
+          <button class="btn danger sm" onclick="UI.deleteExam('${e.id}')">🗑️ ลบ</button>
+        </div></div>`;
+    }
+    UI.el().innerHTML=html;
+  },
+
+  // ── แก้ไข/สร้างข้อสอบ (modal) ──
+  editExam(id){
+    const e = id? Store.examById(id) : null;
+    const isNew=!e;
+    Modal.open(`${isNew?'สร้าง':'แก้ไข'}ข้อสอบ`, `
+      <label class="fld"><span>ชื่อข้อสอบ</span><input id="f_name" type="text" value="${Utils.esc(e?.name||'')}" placeholder="เช่น สอบกลางภาค 1/2568"></label>
+      <div class="grid2">
+        <label class="fld"><span>วิชา</span><input id="f_subject" type="text" value="${Utils.esc(e?.subject||'')}"></label>
+        <label class="fld"><span>ชั้น/ห้อง</span><input id="f_class" type="text" value="${Utils.esc(e?.className||'')}"></label>
+      </div>
+      <label class="fld"><span>วันที่สอบ</span><input id="f_date" type="date" value="${Utils.esc(e?.date||'')}"></label>
+      <div class="grid2">
+        <label class="fld"><span>จำนวนข้อ (10–100)</span><input id="f_nq" type="number" min="10" max="100" value="${e?.numQuestions||20}"></label>
+        <label class="fld"><span>จำนวนตัวเลือก</span>
+          <select id="f_nc"><option value="4" ${e?.numChoices===4?'selected':''}>4 (ก-ง)</option><option value="5" ${(!e||e.numChoices===5)?'selected':''}>5 (ก-จ)</option></select></label>
+      </div>
+      ${isNew?`<label class="fld"><span>ชุดข้อสอบเริ่มต้น (คั่นด้วย , )</span><input id="f_sets" type="text" value="A" placeholder="เช่น A,B"></label>`:''}
+    `, [
+      {label:'บันทึก', cls:'', fn:()=>{
+        const nq=Utils.clamp(parseInt(document.getElementById('f_nq').value)||20,10,100);
+        const nc=parseInt(document.getElementById('f_nc').value)||5;
+        const name=document.getElementById('f_name').value.trim();
+        if(!name){ Utils.toast('กรุณาใส่ชื่อข้อสอบ','err'); return false; }
+        if(isNew){
+          const codes=(document.getElementById('f_sets').value||'A').split(',').map(s=>s.trim()).filter(Boolean);
+          const sets=(codes.length?codes:['A']).map(code=>({
+            setCode:code, answerKey:new Array(nq).fill(''), scorePerItem:new Array(nq).fill(1)
+          }));
+          Store.exams.push({ id:Utils.uid('ex'), name,
+            subject:document.getElementById('f_subject').value.trim(),
+            className:document.getElementById('f_class').value.trim(),
+            date:document.getElementById('f_date').value,
+            numQuestions:nq, numChoices:nc, sets });
+          Utils.toast('สร้างข้อสอบแล้ว','ok');
+        }else{
+          e.name=name; e.subject=document.getElementById('f_subject').value.trim();
+          e.className=document.getElementById('f_class').value.trim();
+          e.date=document.getElementById('f_date').value;
+          e.numChoices=nc;
+          if(nq!==e.numQuestions){ // ปรับขนาด key/score ทุกชุด
+            for(const s of e.sets){
+              s.answerKey=UI._resize(s.answerKey,nq,'');
+              s.scorePerItem=UI._resize(s.scorePerItem,nq,1);
+            }
+            e.numQuestions=nq;
+          }
+          Utils.toast('บันทึกแล้ว','ok');
+        }
+        Store.save(); Modal.close(); UI.exams();
+      }},
+      {label:'ยกเลิก', cls:'gray', fn:()=>Modal.close()}
+    ]);
+  },
+  _resize(arr,n,fill){ const a=(arr||[]).slice(0,n); while(a.length<n)a.push(fill); return a; },
+
+  // ── นำเข้าข้อสอบจากไฟล์ .xlsx ──
+  importExamXlsx(){
+    if(!ExcelIO.ready()){ Utils.toast('โหลดไลบรารี Excel ไม่สำเร็จ (ตรวจอินเทอร์เน็ต)','err',3500); return; }
+    const inp=document.createElement('input'); inp.type='file'; inp.accept='.xlsx,.xls,.csv';
+    inp.onchange=async()=>{
+      const f=inp.files[0]; if(!f) return;
+      try{
+        const exam=await ExcelIO.importExam(f);
+        const preview=exam.sets.map(s=>`ชุด ${s.setCode}: กรอกเฉลย ${s.answerKey.filter(Boolean).length}/${exam.numQuestions}`).join('<br>');
+        Modal.confirm('นำเข้าข้อสอบนี้?',
+          `<b>${Utils.esc(exam.name)}</b><br>${exam.numQuestions} ข้อ • ${exam.numChoices} ตัวเลือก • ${exam.sets.length} ชุด<br><div class="muted" style="margin-top:6px;">${preview}</div>`,
+          ()=>{ Store.exams.push(exam); Store.save(); UI.exams(); Utils.toast('นำเข้าข้อสอบสำเร็จ','ok'); });
+      }catch(err){ Utils.toast('นำเข้าไม่สำเร็จ: '+err.message,'err',4500); }
+    };
+    inp.click();
+  },
+
+  deleteExam(id){
+    const e=Store.examById(id); if(!e) return;
+    const nRes=Store.resultsOfExam(id).length;
+    Modal.confirm('ลบข้อสอบ?', `ลบ "${Utils.esc(e.name)}"${nRes?` และผลคะแนน ${nRes} รายการ`:''} ถาวร`, ()=>{
+      Store.data.exams=Store.exams.filter(x=>x.id!==id);
+      Store.data.results=Store.results.filter(r=>r.examId!==id);
+      Store.save(); Utils.toast('ลบแล้ว','ok'); UI.exams();
+    }, 'danger');
+  },
+
+  // ── จัดการชุด + เฉลย ──
+  manageSets(examId){
+    const e=Store.examById(examId); if(!e) return;
+    UI._setState={ examId, activeSet:(e.sets[0]?.setCode)||'A' };
+    UI.renderSets();
+  },
+  renderSets(){
+    const e=Store.examById(UI._setState.examId);
+    const active=UI._setState.activeSet;
+    const set=Store.setInExam(e,active)||e.sets[0];
+    let html=`<div class="spread" style="margin-bottom:10px;">
+      <div><h2 style="margin:0;">เฉลย: ${Utils.esc(e.name)}</h2><div class="muted">${e.numQuestions} ข้อ • ${e.numChoices} ตัวเลือก</div></div>
+      <button class="btn gray sm" onclick="UI.exams()">‹ กลับ</button></div>`;
+
+    // แถบเลือกชุด
+    html+=`<div class="card"><div class="spread"><h3 style="margin:0;">ชุดข้อสอบ</h3>
+      <button class="btn sm ghost" onclick="UI.addSet()">+ เพิ่มชุด</button></div>
+      <div class="hlist" style="margin-top:8px;">`;
+    for(const s of e.sets){
+      html+=`<span class="chip ${s.setCode===active?'sel':''}" onclick="UI.switchSet('${s.setCode}')">ชุด ${Utils.esc(s.setCode)}</span>`;
+    }
+    html+=`</div></div>`;
+
+    // เครื่องมือเฉลยรวด
+    const filled=(set.answerKey||[]).filter(Boolean).length;
+    html+=`<div class="card">
+      <div class="spread"><h3 style="margin:0;">เฉลยชุด ${Utils.esc(active)}</h3><span class="pill ${filled===e.numQuestions?'ok':'warn'}">กรอกแล้ว ${filled}/${e.numQuestions}</span></div>
+      <label class="fld" style="margin-top:8px;"><span>วางเฉลยแบบพิมพ์รวด (เช่น กขคงจ... หรือ 1,2,3,4)</span>
+        <textarea id="bulkKey" placeholder="พิมพ์ ก ข ค ง จ ต่อกัน หรือคั่นด้วยช่องว่าง/จุลภาค แล้วกดวาง"></textarea></label>
+      <div class="grid2">
+        <button class="btn ghost sm" onclick="UI.applyBulkKey()">📥 วางเฉลย</button>
+        <button class="btn gray sm" onclick="UI.clearKey()">ล้างเฉลยชุดนี้</button>
+      </div>
+      <div class="divider"></div>
+      <div class="muted" style="margin-bottom:6px;">แตะเลือกตัวเลือก และแก้คะแนนรายข้อได้</div>
+      <div id="keyList">`;
+    for(let q=0;q<e.numQuestions;q++){
+      html+=`<div class="keyrow"><div class="qn">${q+1}</div><div class="row" style="gap:5px;">`;
+      for(let c=0;c<e.numChoices;c++){
+        const sel = Utils.labelToIndex(set.answerKey[q])===c;
+        html+=`<div class="bubble-choice ${sel?'sel':''}" onclick="UI.setKey(${q},${c})">${Utils.choiceLabel(c)}</div>`;
+      }
+      html+=`</div><div class="sc"><input type="number" min="0" step="0.5" value="${set.scorePerItem[q]??1}" onchange="UI.setScore(${q},this.value)" title="คะแนนข้อนี้"></div></div>`;
+    }
+    html+=`</div><button class="btn block ok" style="margin-top:12px;" onclick="UI.saveSets()">💾 บันทึกเฉลย</button></div>`;
+    UI.el().innerHTML=html;
+  },
+  switchSet(code){ UI._setState.activeSet=code; UI.renderSets(); },
+  addSet(){
+    const e=Store.examById(UI._setState.examId);
+    Modal.open('เพิ่มชุดข้อสอบ',`<label class="fld"><span>รหัสชุด (เช่น B, C)</span><input id="newSet" type="text" maxlength="3" placeholder="B"></label>`,
+      [{label:'เพิ่ม',fn:()=>{
+        const code=(document.getElementById('newSet').value||'').trim().toUpperCase();
+        if(!code){ Utils.toast('ใส่รหัสชุด','err'); return false; }
+        if(Store.setInExam(e,code)){ Utils.toast('มีชุดนี้แล้ว','err'); return false; }
+        e.sets.push({ setCode:code, answerKey:new Array(e.numQuestions).fill(''), scorePerItem:new Array(e.numQuestions).fill(1) });
+        Store.save(); UI._setState.activeSet=code; Modal.close(); UI.renderSets(); Utils.toast('เพิ่มชุด '+code,'ok');
+      }},{label:'ยกเลิก',cls:'gray',fn:()=>Modal.close()}]);
+  },
+  setKey(q,c){
+    const e=Store.examById(UI._setState.examId); const s=Store.setInExam(e,UI._setState.activeSet);
+    // แตะซ้ำ = ยกเลิก
+    s.answerKey[q] = (Utils.labelToIndex(s.answerKey[q])===c)? '' : Utils.choiceLabel(c);
+    UI.renderSets();
+  },
+  setScore(q,v){
+    const e=Store.examById(UI._setState.examId); const s=Store.setInExam(e,UI._setState.activeSet);
+    s.scorePerItem[q]=parseFloat(v)||0;
+  },
+  applyBulkKey(){
+    const e=Store.examById(UI._setState.examId); const s=Store.setInExam(e,UI._setState.activeSet);
+    let raw=document.getElementById('bulkKey').value.trim();
+    if(!raw){ Utils.toast('ยังไม่ได้พิมพ์เฉลย','warn'); return; }
+    let tokens;
+    if(/[,\s]/.test(raw)) tokens=raw.split(/[,\s]+/).filter(Boolean);
+    else tokens=raw.split('');
+    const map={'1':'ก','2':'ข','3':'ค','4':'ง','5':'จ','a':'ก','b':'ข','c':'ค','d':'ง','e':'จ','A':'ก','B':'ข','C':'ค','D':'ง','E':'จ'};
+    for(let i=0;i<Math.min(tokens.length,e.numQuestions);i++){
+      let t=tokens[i]; if(map[t]) t=map[t];
+      if(Utils.CHOICE_LABELS.slice(0,e.numChoices).includes(t)) s.answerKey[i]=t;
+    }
+    Utils.toast(`วางเฉลย ${Math.min(tokens.length,e.numQuestions)} ข้อ`,'ok'); UI.renderSets();
+  },
+  clearKey(){
+    const e=Store.examById(UI._setState.examId); const s=Store.setInExam(e,UI._setState.activeSet);
+    Modal.confirm('ล้างเฉลยชุดนี้?','ลบเฉลยทั้งหมดของชุด '+UI._setState.activeSet, ()=>{
+      s.answerKey=new Array(e.numQuestions).fill(''); UI.renderSets(); Utils.toast('ล้างแล้ว','ok');
+    },'danger');
+  },
+  saveSets(){ Store.save(); Utils.toast('บันทึกเฉลยแล้ว','ok'); },
+
+  // ── กล่องพิมพ์กระดาษ ──
+  printDialog(examId){
+    const e=Store.examById(examId); if(!e) return;
+    const codes=(e.sets||[]).map(s=>s.setCode);
+    UI._printSel=new Set(codes);
+    Modal.open('พิมพ์กระดาษคำตอบ', `
+      <div class="muted" style="margin-bottom:8px;">เลือกชุดที่จะพิมพ์ (พิมพ์สลับชุดได้)</div>
+      <div class="row wrap" id="printSets">
+        ${codes.map(c=>`<span class="chip sel" data-c="${c}" onclick="UI.togglePrint('${c}',this)">ชุด ${c}</span>`).join('')}
+      </div>
+      <div class="divider"></div>
+      <div class="muted">💡 พิมพ์บนกระดาษ A4 ธรรมดา ตั้งค่า “ขนาดจริง 100%” และปิดขอบอัตโนมัติเพื่อให้สแกนแม่นยำ</div>
+    `,[
+      {label:'🖨️ พิมพ์', fn:()=>{
+        const sel=[...UI._printSel]; if(!sel.length){ Utils.toast('เลือกอย่างน้อย 1 ชุด','err'); return false; }
+        Modal.close(); SheetGen.printExamSets(e, sel);
+      }},
+      {label:'ยกเลิก', cls:'gray', fn:()=>Modal.close()}
+    ]);
+  },
+  togglePrint(c,el){ if(UI._printSel.has(c)){UI._printSel.delete(c); el.classList.remove('sel');} else {UI._printSel.add(c); el.classList.add('sel');} },
+
+  // ════════ หน้าสแกน ════════
+  scan(){
+    if(!Store.exams.length){
+      UI.el().innerHTML=`<div class="card"><div class="empty"><div class="big">📝</div>ยังไม่มีข้อสอบ<br>สร้างข้อสอบและพิมพ์กระดาษก่อนสแกน<br><button class="btn ghost" style="margin-top:12px;" onclick="Router.go('exams')">ไปหน้าข้อสอบ</button></div></div>`;
+      return;
+    }
+    UI.el().innerHTML=`
+    <div class="card" style="padding:10px;">
+      <div id="scanWrap">
+        <video id="scanVideo" playsinline muted></video>
+        <canvas id="scanOverlay"></canvas>
+        <div class="scan-status" id="scanStatus"></div>
+        <div class="scan-hint" id="scanHint">กำลังเปิดกล้อง…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="muted">เล็งให้เห็น <b>QR (มุมขวาบน)</b> และ <b>สี่เหลี่ยมดำครบ 4 มุม</b> ถือกล้องให้นิ่ง ระบบจะสั่นเมื่ออ่านสำเร็จ</div>
+      <button class="btn block gray" style="margin-top:10px;" onclick="Scanner.stop(); Router.go('home')">หยุดสแกน</button>
+    </div>`;
+    const v=document.getElementById('scanVideo'), ov=document.getElementById('scanOverlay');
+    Scanner.onResult=(r)=>UI.confirmScan(r);
+    Scanner.start(v,ov);
+  },
+
+  // ── หน้ายืนยันผลสแกน ──
+  confirmScan(r){
+    const e=r.exam;
+    // ตรวจซ้ำ (examId + studentCode)
+    const dup=Store.results.find(x=>x.examId===e.id && x.studentCode===r.studentCode && !r.studentCode.includes('_'));
+    let flagHtml='';
+    if(r.flags.length){
+      flagHtml=`<div class="card" style="border-color:var(--warn); background:#fffdf5;"><b style="color:#8a6400;">⚠️ ต้องตรวจสอบ (${r.flags.length})</b><div class="flaglist" style="margin-top:6px; color:#8a6400;">`;
+      for(const f of r.flags){
+        if(f.type==='blank') flagHtml+=`ข้อ ${f.q+1}: ไม่ได้ฝน<br>`;
+        else if(f.type==='multi') flagHtml+=`ข้อ ${f.q+1}: ฝนซ้ำ (${f.choices.map(c=>Utils.choiceLabel(c)).join(',')})<br>`;
+        else if(f.type==='id') flagHtml+=`รหัสนักเรียนหลักที่ ${f.cols.map(c=>c+1).join(',')} อ่านไม่ชัด<br>`;
+      }
+      flagHtml+=`</div></div>`;
+    }
+    // แถวแก้คำตอบรายข้อ
+    let rows='';
+    for(let q=0;q<e.numQuestions;q++){
+      const set=r.set, keyIdx=Utils.labelToIndex(set.answerKey[q]);
+      const a=r.answers[q];
+      const flagged=r.flags.some(f=>f.q===q);
+      let stat = a<0? '<span class="pill err">ว่าง/ซ้ำ</span>' : (a===keyIdx?'<span class="pill ok">ถูก</span>':'<span class="pill err">ผิด</span>');
+      rows+=`<div class="keyrow" style="${flagged?'background:#fffdf5;':''}"><div class="qn">${q+1}</div><div class="row" style="gap:4px;">`;
+      for(let c=0;c<e.numChoices;c++){
+        const sel=a===c;
+        rows+=`<div class="bubble-choice ${sel?'sel':''}" style="width:30px;height:30px;font-size:13px;" onclick="UI.fixAnswer(${q},${c})">${Utils.choiceLabel(c)}</div>`;
+      }
+      rows+=`</div><div style="margin-left:auto;">${stat}</div></div>`;
+    }
+
+    Modal.open('ยืนยันผลการสแกน', `
+      <div class="grid2">
+        <label class="fld"><span>รหัสนักเรียน</span><input id="cf_code" type="text" value="${Utils.esc(r.studentCode)}"></label>
+        <div class="stat" style="align-self:end;"><div class="v" id="cf_score">${r.score}/${r.maxScore}</div><div class="k">คะแนน</div></div>
+      </div>
+      <div class="muted">ข้อสอบ: ${Utils.esc(e.name)} • ชุด ${Utils.esc(r.set.setCode)}</div>
+      ${dup?`<div class="card" style="border-color:var(--err); background:#fff5f5;"><b style="color:var(--err);">พบผลเดิมของรหัสนี้แล้ว</b><div class="muted">เมื่อบันทึกให้เลือกว่าจะทับหรือเก็บทั้งคู่</div></div>`:''}
+      ${flagHtml}
+      <div class="divider"></div>
+      <div class="muted" style="margin-bottom:4px;">ตรวจ/แก้คำตอบรายข้อ (แตะเพื่อแก้)</div>
+      <div id="cf_rows">${rows}</div>
+    `,[
+      {label:'💾 บันทึก', cls:'ok', fn:()=>UI.saveScan(r, dup)},
+      {label:'สแกนต่อ', cls:'gray', fn:()=>{ Modal.close(); Scanner.resume(); }}
+    ], ()=>{ Scanner.resume(); }); // ปิดด้วยพื้นหลัง = สแกนต่อ
+    // เก็บ ref เพื่อ fixAnswer
+    UI._scanRef=r;
+  },
+  fixAnswer(q,c){
+    const r=UI._scanRef; const cur=r.answers[q];
+    r.answers[q] = (cur===c)? -1 : c;
+    // คำนวณคะแนนใหม่
+    const g=Grader.grade(r.exam, r.set, r.answers);
+    r.score=g.score; r.maxScore=g.maxScore; r.perItem=g.perItem;
+    // อัพเดต flags (ลบ flag ข้อนี้ถ้าแก้แล้วมีคำตอบเดียว)
+    r.flags=r.flags.filter(f=>f.q!==q || f.type==='id');
+    if(r.answers[q]<0) r.flags.push({q,type:'blank'});
+    // re-render rows + score
+    UI._rerenderConfirm(r);
+  },
+  _rerenderConfirm(r){
+    const e=r.exam;
+    document.getElementById('cf_score').textContent=`${r.score}/${r.maxScore}`;
+    let rows='';
+    for(let q=0;q<e.numQuestions;q++){
+      const keyIdx=Utils.labelToIndex(r.set.answerKey[q]); const a=r.answers[q];
+      const flagged=r.flags.some(f=>f.q===q);
+      let stat = a<0? '<span class="pill err">ว่าง</span>' : (a===keyIdx?'<span class="pill ok">ถูก</span>':'<span class="pill err">ผิด</span>');
+      rows+=`<div class="keyrow" style="${flagged?'background:#fffdf5;':''}"><div class="qn">${q+1}</div><div class="row" style="gap:4px;">`;
+      for(let c=0;c<e.numChoices;c++){ const sel=a===c;
+        rows+=`<div class="bubble-choice ${sel?'sel':''}" style="width:30px;height:30px;font-size:13px;" onclick="UI.fixAnswer(${q},${c})">${Utils.choiceLabel(c)}</div>`; }
+      rows+=`</div><div style="margin-left:auto;">${stat}</div></div>`;
+    }
+    document.getElementById('cf_rows').innerHTML=rows;
+  },
+  saveScan(r, dup){
+    const code=document.getElementById('cf_code').value.trim();
+    const rec={ id:Utils.uid('res'), examId:r.exam.id, setCode:r.set.setCode, studentCode:code,
+      timestamp:Date.now(), answers:r.answers.slice(), score:r.score, maxScore:r.maxScore,
+      flags:r.flags.slice() };
+    const existing=Store.results.find(x=>x.examId===r.exam.id && x.studentCode===code);
+    if(existing){
+      Modal.confirmChoice('พบผลเดิมของรหัสนี้','ต้องการทำอย่างไร?', [
+        {label:'ทับผลเดิม', cls:'warn', fn:()=>{ Object.assign(existing,rec,{id:existing.id}); Store.save(); UI._afterSave(); }},
+        {label:'เก็บทั้งคู่', cls:'ghost', fn:()=>{ Store.results.push(rec); Store.save(); UI._afterSave(); }},
+        {label:'ยกเลิก', cls:'gray', fn:()=>{} }
+      ]);
+    }else{
+      Store.results.push(rec); Store.save(); UI._afterSave();
+    }
+  },
+  _afterSave(){
+    Utils.toast('บันทึกผลแล้ว ✓','ok'); Utils.vibrate(60);
+    Modal.closeAll(); Scanner.stableCount=0; Scanner.lastSignature=''; Scanner.resume();
+  },
+
+  // ════════ หน้าผลคะแนน ════════
+  results(examId){
+    const ex=Store.exams;
+    if(!ex.length){ UI.el().innerHTML=`<div class="card"><div class="empty"><div class="big">📊</div>ยังไม่มีข้อสอบ</div></div>`; return; }
+    const cur = examId? Store.examById(examId) : ex.find(e=>Store.resultsOfExam(e.id).length) || ex[0];
+    UI._resExam=cur.id;
+    let html=`<div class="card"><label class="fld" style="margin:0;"><span>เลือกข้อสอบ</span>
+      <select onchange="UI.results(this.value)">${ex.map(e=>`<option value="${e.id}" ${e.id===cur.id?'selected':''}>${Utils.esc(e.name)} (${Store.resultsOfExam(e.id).length})</option>`).join('')}</select></label></div>`;
+
+    const rs=Store.resultsOfExam(cur.id);
+    if(!rs.length){ html+=`<div class="card"><div class="empty"><div class="big">📊</div>ยังไม่มีผลของข้อสอบนี้<br><button class="btn ghost" style="margin-top:12px;" onclick="Router.go('scan')">📷 ไปสแกน</button></div></div>`; UI.el().innerHTML=html; return; }
+
+    // สถิติ
+    const st=Grader.stats(cur); const pass=Store.settings.passScore;
+    html+=`<div class="card"><h3>สถิติ (${st.n} คน • เต็ม ${st.maxScore})</h3>
+      <div class="grid3">
+        <div class="stat"><div class="v">${st.avg.toFixed(1)}</div><div class="k">เฉลี่ย</div></div>
+        <div class="stat"><div class="v">${st.max}</div><div class="k">สูงสุด</div></div>
+        <div class="stat"><div class="v">${st.min}</div><div class="k">ต่ำสุด</div></div>
+      </div>
+      <div class="grid3" style="margin-top:10px;">
+        <div class="stat"><div class="v">${st.sd.toFixed(2)}</div><div class="k">SD</div></div>
+        <div class="stat"><div class="v">${st.passCount}</div><div class="k">ผ่าน (≥${pass}%)</div></div>
+        <div class="stat"><div class="v">${st.n?Math.round(st.passCount/st.n*100):0}%</div><div class="k">อัตราผ่าน</div></div>
+      </div></div>`;
+
+    // ตารางผล
+    html+=`<div class="card"><div class="spread"><h3 style="margin:0;">รายชื่อผล</h3>
+      <div class="row" style="gap:6px;">
+        <button class="btn sm ok" onclick="ExcelIO.exportResults('${cur.id}')">⬇️ Excel</button>
+        <button class="btn sm ghost" onclick="UI.exportResults('${cur.id}')">JSON</button>
+      </div></div>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>รหัส</th><th>ชุด</th><th class="num">คะแนน</th><th class="num">%</th><th></th></tr></thead><tbody>`;
+    for(const r of [...rs].sort((a,b)=>b.score-a.score)){
+      const pct=r.maxScore?Math.round(r.score/r.maxScore*100):0;
+      const passed=pct>=pass;
+      html+=`<tr><td class="mono">${Utils.esc(r.studentCode)}${r.flags&&r.flags.length?' <span class="pill warn" style="font-size:10px;">⚠</span>':''}</td>
+        <td>${Utils.esc(r.setCode)}</td><td class="num"><b>${r.score}</b></td>
+        <td class="num"><span class="pill ${passed?'ok':'err'}">${pct}%</span></td>
+        <td class="num"><button class="iconbtn" onclick="UI.editResult('${r.id}')">✏️</button><button class="iconbtn" onclick="UI.deleteResult('${r.id}')">🗑️</button></td></tr>`;
+    }
+    html+=`</tbody></table></div></div>`;
+
+    // วิเคราะห์รายข้อ
+    const ia=Grader.itemAnalysis(cur);
+    html+=`<div class="card"><h3>วิเคราะห์รายข้อ (% ตอบถูก)</h3><div class="muted" style="margin-bottom:8px;">ข้อที่ % ต่ำ = ยาก/ควรทบทวน</div>`;
+    for(let q=0;q<cur.numQuestions;q++){
+      const p=ia.pct[q]; const col=p>=70?'var(--ok)':p>=40?'var(--warn)':'var(--err)';
+      html+=`<div class="row" style="gap:8px; margin-bottom:5px;"><div style="width:34px; text-align:right; font-weight:600; color:var(--muted);">${q+1}</div>
+        <div style="flex:1; background:#eef1f6; border-radius:6px; height:16px; overflow:hidden;"><div style="width:${p}%; height:100%; background:${col};"></div></div>
+        <div style="width:42px; text-align:right; font-variant-numeric:tabular-nums;">${p}%</div></div>`;
+    }
+    html+=`</div>`;
+    UI.el().innerHTML=html;
+  },
+  editResult(id){
+    const r=Store.results.find(x=>x.id===id); if(!r) return;
+    const e=Store.examById(r.examId); const set=Store.setInExam(e,r.setCode);
+    let rows='';
+    for(let q=0;q<e.numQuestions;q++){
+      const a=r.answers[q];
+      rows+=`<div class="keyrow"><div class="qn">${q+1}</div><div class="row" style="gap:4px;">`;
+      for(let c=0;c<e.numChoices;c++){ const sel=a===c;
+        rows+=`<div class="bubble-choice ${sel?'sel':''}" style="width:30px;height:30px;font-size:13px;" onclick="UI.editResFix('${id}',${q},${c},this)">${Utils.choiceLabel(c)}</div>`; }
+      rows+=`</div></div>`;
+    }
+    Modal.open('แก้ไขผล', `
+      <label class="fld"><span>รหัสนักเรียน</span><input id="er_code" type="text" value="${Utils.esc(r.studentCode)}"></label>
+      <div class="muted">คะแนน: <b id="er_score">${r.score}/${r.maxScore}</b></div>
+      <div class="divider"></div><div id="er_rows">${rows}</div>
+    `,[
+      {label:'บันทึก',cls:'ok',fn:()=>{
+        r.studentCode=document.getElementById('er_code').value.trim();
+        const g=Grader.grade(e,set,r.answers); r.score=g.score; r.maxScore=g.maxScore;
+        Store.save(); Modal.close(); UI.results(e.id); Utils.toast('บันทึกแล้ว','ok');
+      }},
+      {label:'ยกเลิก',cls:'gray',fn:()=>Modal.close()}
+    ]);
+    UI._editRes=r;
+  },
+  editResFix(id,q,c){
+    const r=UI._editRes; r.answers[q]=(r.answers[q]===c)?-1:c;
+    const e=Store.examById(r.examId), set=Store.setInExam(e,r.setCode);
+    const g=Grader.grade(e,set,r.answers); r.score=g.score;
+    document.getElementById('er_score').textContent=`${r.score}/${g.maxScore}`;
+    // re-render rows
+    let rows='';
+    for(let qq=0;qq<e.numQuestions;qq++){ const a=r.answers[qq];
+      rows+=`<div class="keyrow"><div class="qn">${qq+1}</div><div class="row" style="gap:4px;">`;
+      for(let cc=0;cc<e.numChoices;cc++){ const sel=a===cc;
+        rows+=`<div class="bubble-choice ${sel?'sel':''}" style="width:30px;height:30px;font-size:13px;" onclick="UI.editResFix('${id}',${qq},${cc})">${Utils.choiceLabel(cc)}</div>`; }
+      rows+=`</div></div>`; }
+    document.getElementById('er_rows').innerHTML=rows;
+  },
+  deleteResult(id){
+    const r=Store.results.find(x=>x.id===id); if(!r) return;
+    Modal.confirm('ลบผลนี้?', `ลบผลของรหัส ${Utils.esc(r.studentCode)}`, ()=>{
+      Store.data.results=Store.results.filter(x=>x.id!==id); Store.save();
+      UI.results(r.examId); Utils.toast('ลบแล้ว','ok');
+    },'danger');
+  },
+  exportResults(examId){
+    const e=Store.examById(examId); const rs=Store.resultsOfExam(examId);
+    const out={ type:'scandee_results', exportedAt:new Date().toISOString(),
+      exam:{id:e.id,name:e.name,subject:e.subject,className:e.className,numQuestions:e.numQuestions}, results:rs };
+    Utils.download(`scandee_results_${Utils.todayStr()}.json`, JSON.stringify(out,null,2));
+    Utils.toast('ส่งออกผลแล้ว','ok');
+  },
+
+  // ════════ หน้าตั้งค่า ════════
+  settings(){
+    const S=Store.settings;
+    UI.el().innerHTML=`
+    <div class="card"><h2>ข้อมูลโรงเรียน/ครู</h2>
+      <label class="fld"><span>ชื่อโรงเรียน</span><input id="s_school" type="text" value="${Utils.esc(S.schoolName)}"></label>
+      <label class="fld"><span>ชื่อครูผู้สอน</span><input id="s_teacher" type="text" value="${Utils.esc(S.teacherName)}"></label>
+      <div class="grid2">
+        <label class="fld"><span>เกณฑ์ผ่าน (%)</span><input id="s_pass" type="number" min="0" max="100" value="${S.passScore}"></label>
+        <label class="fld"><span>ความไวการอ่านฝน (0.2–0.8)</span><input id="s_thr" type="number" min="0.15" max="0.85" step="0.05" value="${S.markThreshold}"></label>
+      </div>
+      <div class="muted" style="margin-top:-6px; margin-bottom:10px;">ค่าน้อย=ไวขึ้น (จับฝนจาง), ค่ามาก=เข้มขึ้น แนะนำ 0.45</div>
+      <button class="btn block ok" onclick="UI.saveSettings()">💾 บันทึกตั้งค่า</button>
+    </div>
+
+    <div class="card"><h2>สำรอง / กู้คืนข้อมูล</h2>
+      <div class="grid2">
+        <button class="btn ghost" onclick="UI.exportAll()">⬇️ ส่งออกทั้งระบบ</button>
+        <button class="btn ghost" onclick="UI.exportResultsAll()">⬇️ ส่งออกเฉพาะผล</button>
+      </div>
+      <label class="fld" style="margin-top:12px;"><span>นำเข้าไฟล์ JSON</span>
+        <input id="importFile" type="file" accept="application/json,.json"></label>
+      <div class="grid2">
+        <button class="btn gray sm" onclick="UI.importData('merge')">➕ นำเข้า (รวม)</button>
+        <button class="btn warn sm" onclick="UI.importData('replace')">♻️ นำเข้า (แทนที่)</button>
+      </div>
+    </div>
+
+    <div class="card" style="border-color:var(--err);"><h2 style="color:var(--err);">โซนอันตราย</h2>
+      <button class="btn danger block" onclick="UI.clearAll()">🗑️ ล้างข้อมูลทั้งหมด</button>
+    </div>
+
+    <div class="card" style="text-align:center;">
+      <div style="font-family:'Prompt'; font-weight:700; font-size:18px; color:var(--blue-dark);">ScanDee (สแกนดี)</div>
+      <div class="muted">ระบบตรวจกระดาษคำตอบด้วยกล้องมือถือ<br>พัฒนาโดย ครูนนทพัทธ์ หิรัญเรือง</div>
+    </div>`;
+  },
+  saveSettings(){
+    const S=Store.settings;
+    S.schoolName=document.getElementById('s_school').value.trim();
+    S.teacherName=document.getElementById('s_teacher').value.trim();
+    S.passScore=Utils.clamp(parseFloat(document.getElementById('s_pass').value)||50,0,100);
+    S.markThreshold=Utils.clamp(parseFloat(document.getElementById('s_thr').value)||0.45,0.15,0.85);
+    Store.save(); Utils.toast('บันทึกตั้งค่าแล้ว','ok');
+  },
+  exportAll(){ Utils.download(`scandee_backup_${Utils.todayStr()}.json`, JSON.stringify(Store.data,null,2)); Utils.toast('ส่งออกทั้งระบบแล้ว','ok'); },
+  exportResultsAll(){
+    const out={ type:'scandee_results_all', exportedAt:new Date().toISOString(),
+      exams:Store.exams.map(e=>({id:e.id,name:e.name})), results:Store.results };
+    Utils.download(`scandee_results_${Utils.todayStr()}.json`, JSON.stringify(out,null,2)); Utils.toast('ส่งออกผลแล้ว','ok');
+  },
+  async importData(mode){
+    const f=document.getElementById('importFile').files[0];
+    if(!f){ Utils.toast('เลือกไฟล์ก่อน','err'); return; }
+    let obj; try{ obj=JSON.parse(await Utils.readFile(f)); }catch(e){ Utils.toast('ไฟล์ไม่ถูกต้อง','err'); return; }
+    Modal.confirm(mode==='replace'?'แทนที่ข้อมูลทั้งหมด?':'นำเข้าและรวมข้อมูล?',
+      mode==='replace'?'ข้อมูลปัจจุบันจะถูกเขียนทับทั้งหมด':'จะเพิ่มข้อสอบ/ผล/นักเรียนเข้ากับที่มีอยู่', ()=>{
+      try{
+        if(mode==='replace' && obj.settings && obj.exams){
+          Store.replaceAll(obj); Store.load();
+        }else{
+          // merge
+          if(obj.exams) for(const e of obj.exams){ if(!Store.examById(e.id)) Store.exams.push(e); }
+          if(obj.results) for(const r of obj.results){ if(!Store.results.find(x=>x.id===r.id)) Store.results.push(r); }
+          if(obj.students) for(const s of obj.students){ if(!Store.data.students.find(x=>x.id===s.id)) Store.data.students.push(s); }
+          Store.save();
+        }
+        Utils.toast('นำเข้าสำเร็จ','ok'); UI.settings();
+      }catch(err){ Utils.toast('นำเข้าไม่สำเร็จ: '+err.message,'err'); }
+    }, mode==='replace'?'warn':'');
+  },
+  clearAll(){
+    Modal.confirm('ยืนยันครั้งที่ 1', 'จะล้างข้อสอบ ผลคะแนน และการตั้งค่าทั้งหมด — กู้คืนไม่ได้', ()=>{
+      Modal.confirm('ยืนยันครั้งที่ 2 (ครั้งสุดท้าย)', 'แน่ใจจริงหรือไม่? แนะนำให้ส่งออกสำรองก่อน', ()=>{
+        localStorage.removeItem(Store.KEY); Store.load(); Utils.toast('ล้างข้อมูลแล้ว','ok'); Router.go('home');
+      }, 'danger');
+    }, 'danger');
+  },
+};
+
+/* ─────────────────────────── Modal: กล่องโต้ตอบ ─────────────────────────── */
+const Modal = {
+  stack:0,
+  open(title, bodyHTML, buttons=[], onDismiss=null){
+    const root=document.getElementById('modalRoot');
+    const bg=document.createElement('div'); bg.className='modal-bg';
+    const btns=buttons.map((b,i)=>`<button class="btn ${b.cls||''}" style="flex:1;" data-i="${i}">${b.label}</button>`).join('');
+    bg.innerHTML=`<div class="modal"><h2>${title}</h2><div class="mbody">${bodyHTML}</div>
+      <div class="row" style="margin-top:14px; gap:8px;">${btns}</div></div>`;
+    root.appendChild(bg); Modal.stack++;
+    // ผูก event ปุ่ม (fn คืน false = ไม่ปิด modal อัตโนมัติ; ฟังก์ชันจัดการปิดเอง)
+    bg.querySelectorAll('.modal > .row .btn').forEach(el=>{
+      el.addEventListener('click',()=>{ buttons[+el.dataset.i].fn(); });
+    });
+    // แตะพื้นหลัง = ปิด + เรียก onDismiss
+    bg.addEventListener('click',ev=>{ if(ev.target===bg){ Modal.close(); if(onDismiss) onDismiss(); } });
+    bg._onDismiss=onDismiss;
+    return bg;
+  },
+  close(){
+    const root=document.getElementById('modalRoot');
+    const last=root.lastElementChild; if(last){ last.remove(); Modal.stack=Math.max(0,Modal.stack-1); }
+  },
+  closeAll(){ document.getElementById('modalRoot').innerHTML=''; Modal.stack=0; },
+  confirm(title, msg, onYes, yesCls=''){
+    Modal.open(title, `<div class="muted">${msg}</div>`, [
+      {label:'ยืนยัน', cls:yesCls||'', fn:()=>{ Modal.close(); onYes&&onYes(); }},
+      {label:'ยกเลิก', cls:'gray', fn:()=>Modal.close()}
+    ]);
+  },
+  confirmChoice(title, msg, buttons){
+    Modal.open(title, `<div class="muted">${msg}</div>`, buttons.map(b=>({
+      label:b.label, cls:b.cls||'', fn:()=>{ Modal.close(); b.fn&&b.fn(); }
+    })));
+  },
+};
+
+/* ─────────────────────────── Router: สลับหน้าแบบ hash ─────────────────────────── */
+const Router = {
+  routes:{ home:UI.home, exams:UI.exams, scan:UI.scan, results:UI.results, settings:UI.settings },
+  current:'home',
+  go(tab, param){
+    // ออกจากกล้องเมื่อออกจากหน้าสแกน
+    if(Router.current==='scan' && tab!=='scan') Scanner.stop();
+    Router.current=tab;
+    location.hash = param? `#${tab}/${param}` : `#${tab}`;
+    UI.setTab(tab);
+    (Router.routes[tab]||UI.home)(param);
+    window.scrollTo(0,0);
+  },
+  parseHash(){
+    const h=location.hash.replace(/^#/,''); const [tab,param]=h.split('/');
+    return { tab:tab||'home', param };
+  },
+  init(){
+    document.querySelectorAll('.tabbar button').forEach(b=>{
+      b.addEventListener('click',()=>Router.go(b.dataset.tab));
+    });
+    window.addEventListener('hashchange',()=>{
+      const {tab,param}=Router.parseHash();
+      if(tab!==Router.current || tab==='results' || tab==='exams'){ Router.current=tab; UI.setTab(tab); (Router.routes[tab]||UI.home)(param); }
+    });
+    const {tab,param}=Router.parseHash();
+    Router.go(tab,param);
+  },
+};
+
+/* ─────────────────────────── บูตแอป ─────────────────────────── */
+window.addEventListener('DOMContentLoaded',()=>{
+  Store.load();
+  if(typeof qrcode==='undefined') Utils.toast('โหลดไลบรารี QR ไม่สำเร็จ (ตรวจอินเทอร์เน็ต)','warn',4000);
+  Router.init();
+});
+// หยุดกล้องเมื่อออกจากหน้า
+window.addEventListener('pagehide',()=>Scanner.stop());
+window.addEventListener('beforeunload',()=>Scanner.stop());
+</script>
+</body>
+</html>
