@@ -461,10 +461,10 @@ const Layout = {
 
 /* ─────────────────────────── SheetGen: สร้างกระดาษคำตอบ SVG A4 ─────────────────────────── */
 const SheetGen = {
-  // สร้าง QR เป็น data URL (PNG) ด้วย qrcode-generator
-  qrDataURL(text, cell=4){
-    const qr = qrcode(0,'M'); qr.addData(text); qr.make();
-    return qr.createDataURL(cell, 8);
+  // สร้าง QR เป็น data URL (PNG) ด้วย qrcode-generator — ใช้ EC ต่ำ (L) ให้โมดูลน้อย/โปร่ง สแกนง่าย
+  qrDataURL(text, cell=6){
+    const qr = qrcode(0,'L'); qr.addData(text); qr.make();
+    return qr.createDataURL(cell, 6);
   },
   // สร้าง SVG กระดาษคำตอบ 1 แผ่นสำหรับ exam+set
   buildSheetSVG(exam, set){
@@ -473,12 +473,10 @@ const SheetGen = {
     const mm=v=>v; // ทำงานในหน่วย mm ตรง viewBox
     const W=Layout.A4.w, H=Layout.A4.h, fs=Layout.FID_SIZE;
     const ap=L.meta.ansLayout, rct=L.meta.rect, ip=L.meta.idParams;
-    // ข้อมูลใน QR
-    const qrPayload = JSON.stringify({
-      examId:exam.id, setCode:set.setCode,
-      layout:{ rows:ap.rowsPerCol, cols:ap.numCols, numChoices:exam.numChoices, numQuestions:exam.numQuestions }
-    });
-    const qrURL = SheetGen.qrDataURL(qrPayload, 4);
+    // ข้อมูลใน QR — สั้นที่สุด (SD|examId|setCode) เพื่อให้ QR โปร่ง สแกนง่าย
+    // (โครงคำตอบไม่ต้องใส่ เพราะ Scanner คำนวณเองจากข้อมูลข้อสอบ)
+    const qrPayload = `SD|${exam.id}|${set.setCode}`;
+    const qrURL = SheetGen.qrDataURL(qrPayload, 6);
 
     // ไม่กำหนดขนาดตายตัว (mm) — ใช้ viewBox + preserveAspectRatio ให้ย่อพอดีหน้าเสมอ กันเนื้อหาตกขอบตอนพิมพ์
     let svg=`<svg class="sheet-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="background:#fff; display:block;">`;
@@ -502,9 +500,9 @@ const SheetGen = {
     svg+=`<text x="62" y="43.5" font-family="Sarabun" font-size="3.6" fill="#000">คะแนน</text>`;
     svg+=`<line x1="76" y1="44" x2="120" y2="44" stroke="#000" stroke-width=".35"/>`;
 
-    // ── QR มุมขวาบน (เว้นห่างจาก fiducial ไม่ให้ชนกัน, ข้อความไม่ล้นขอบ) ──
-    const qrSize=22, qrX=164, qrY=21;   // ขวาสุด 186 < fiducial (192)
-    svg+=`<rect x="${qrX-1.5}" y="${qrY-1.5}" width="${qrSize+3}" height="${qrSize+3}" rx="1.5" fill="#fff" stroke="#ddd" stroke-width=".3"/>`;
+    // ── QR มุมขวาบน (ใหญ่ขึ้น สแกนง่าย, เว้นห่างจาก fiducial ไม่ให้ชนกัน) ──
+    const qrSize=28, qrX=158, qrY=17;   // ขวาสุด 186 < fiducial (192)
+    svg+=`<rect x="${qrX-1.5}" y="${qrY-1.5}" width="${qrSize+3}" height="${qrSize+3}" rx="1.5" fill="#fff" stroke="#ccc" stroke-width=".3"/>`;
     svg+=`<image href="${qrURL}" x="${qrX}" y="${qrY}" width="${qrSize}" height="${qrSize}" />`;
     svg+=`<text x="${qrX+qrSize/2}" y="${qrY+qrSize+3}" text-anchor="middle" font-family="Sarabun" font-size="2.5" fill="#555">อย่าฝนทับบริเวณนี้</text>`;
 
@@ -767,6 +765,12 @@ const Scanner = {
     Scanner.video=videoEl; Scanner.overlay=overlayEl;
     Scanner.forceCapture=false; Scanner._pulled=false;
     Scanner.work=document.createElement('canvas'); Scanner.wctx=Scanner.work.getContext('2d',{willReadFrequently:true});
+    // ตรวจว่าตัวอ่าน QR โหลดสำเร็จ
+    if(typeof jsQR==='undefined'){
+      const h=document.getElementById('scanHint');
+      if(h) h.innerHTML='โหลดตัวอ่าน QR (jsQR) ไม่สำเร็จ<br>ตรวจอินเทอร์เน็ต แล้วรีเฟรชหน้าใหม่';
+      Utils.toast('โหลด jsQR ไม่สำเร็จ','err',4500); return false;
+    }
     // ต้องเปิดผ่าน https (หรือ localhost) กล้องจึงทำงาน
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
       const h=document.getElementById('scanHint');
@@ -800,34 +804,49 @@ const Scanner = {
     if(Scanner.stream){ Scanner.stream.getTracks().forEach(t=>t.stop()); Scanner.stream=null; }
     if(Scanner.video) Scanner.video.srcObject=null;
   },
-  // วนอ่านทุก ~300ms
+  // วนอ่านทุก ~300ms (ครอบ try/catch กันลูปตายเมื่อเฟรมใดเฟรมหนึ่งพัง)
   loop(){
     if(!Scanner.running) return;
-    Scanner.processFrame();
-    Scanner.timer=setTimeout(()=>Scanner.loop(), 300);
+    try{ Scanner.processFrame(); }
+    catch(e){ console.error('scan frame error:', e);
+      Scanner.updateStatus({qr:false,fid:false,read:false}, 'ข้อผิดพลาด: '+(e&&e.message||e)); }
+    Scanner.timer=setTimeout(()=>Scanner.loop(), 280);
+  },
+
+  // แยกรหัสจากข้อความ QR (รองรับทั้งแบบสั้น SD|id|set และ JSON แบบเก่า)
+  parseQR(raw){
+    if(!raw) return null;
+    raw=String(raw).trim();
+    try{
+      if(raw[0]==='{'){ const o=JSON.parse(raw); return o.examId?{examId:o.examId,setCode:o.setCode}:null; }
+      const p=raw.split('|');
+      if(p[0]==='SD' && p[1]) return { examId:p[1], setCode:p[2]||'' };
+      if(p.length>=2) return { examId:p[0], setCode:p[1] };
+    }catch(e){}
+    return null;
   },
 
   // ── ประมวลผล 1 เฟรม ──
   processFrame(){
+    Scanner._beat=(Scanner._beat||0)+1;
+    const spin=['◐','◓','◑','◒'][Scanner._beat%4];
     const v=Scanner.video;
-    if(!v || v.videoWidth===0){ return; }
+    if(!v || v.videoWidth===0){ Scanner.updateStatus({qr:false,fid:false,read:false}, 'กำลังรอภาพจากกล้อง… '+spin); return; }
     const w=v.videoWidth, h=v.videoHeight;
     const cn=Scanner.work; cn.width=w; cn.height=h;
     const ctx=Scanner.wctx;
     ctx.drawImage(v,0,0,w,h);
     let img;
-    try{ img=ctx.getImageData(0,0,w,h); }catch(e){ return; }
+    try{ img=ctx.getImageData(0,0,w,h); }catch(e){ Scanner.updateStatus({qr:false,fid:false,read:false},'อ่านภาพไม่ได้: '+e.message); return; }
 
-    // a) อ่าน QR
+    // a) อ่าน QR (ลองทั้งภาพปกติและกลับสี)
     let qr=null;
-    try{ qr=jsQR(img.data, w, h, {inversionAttempts:'dontInvert'}); }catch(e){}
+    try{ qr=jsQR(img.data, w, h, {inversionAttempts:'attemptBoth'}); }catch(e){}
     const state={ qr:false, fid:false, read:false };
-    let payload=null;
-    if(qr && qr.data){
-      try{ payload=JSON.parse(qr.data); state.qr=true; }catch(e){}
-    }
+    let payload=Scanner.parseQR(qr&&qr.data);
+    if(payload) state.qr=true;
     // อัพเดตสถานะ
-    if(!payload){ Scanner.updateStatus(state,'เล็งให้เห็น QR code มุมขวาบน'); Scanner.stableCount=0; return; }
+    if(!payload){ Scanner.updateStatus(state,'เล็งให้เห็น QR (มุมขวาบน) ให้ชัดและเต็มพอ '+spin); Scanner.stableCount=0; return; }
 
     // โหลด exam ตาม payload
     const exam=Store.examById(payload.examId);
@@ -851,7 +870,7 @@ const Scanner = {
 
     // b) หา fiducial 4 มุม
     const fids=Scanner.detectFiducials(img, w, h);
-    if(!fids){ Scanner.updateStatus(state,'จัดกระดาษให้เห็นสี่เหลี่ยมดำครบ 4 มุม'); Scanner.stableCount=0; return; }
+    if(!fids){ Scanner.updateStatus(state,'เจอ QR แล้ว ✓ • ขยับให้เห็นสี่เหลี่ยมดำครบ 4 มุม '+spin); Scanner.stableCount=0; return; }
     state.fid=true;
 
     // c) homography: map กรอบ rectified (มุม fiducial) -> ตำแหน่งในภาพ
