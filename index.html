@@ -10,10 +10,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=Prompt:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-<!-- ไลบรารีภายนอก: jsQR (อ่าน QR) + qrcode-generator (สร้าง QR) + SheetJS (Excel) -->
+<!-- ไลบรารีภายนอก: jsQR (อ่าน QR) + qrcode-generator (สร้าง QR) + SheetJS (Excel) + Firebase (ซิงก์คลาวด์) -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
 
 <style>
 /* ═══════════════════════════ ตัวแปรสี/ธีม ═══════════════════════════ */
@@ -140,15 +142,22 @@ textarea{resize:vertical; min-height:70px; font-family:inherit;}
 .modal h2{color:var(--blue-dark);}
 @media(min-width:600px){ .modal-bg{align-items:center;} .modal{border-radius:18px;} }
 
-/* ── สแกน ── */
-#scanWrap{position:relative; background:#000; border-radius:14px; overflow:hidden;}
-#scanVideo{width:100%; display:block; max-height:70vh; object-fit:cover;}
-#scanOverlay{position:absolute; inset:0; pointer-events:none;}
-.scan-hint{position:absolute; left:0; right:0; bottom:0; padding:10px 14px;
-  background:linear-gradient(transparent,rgba(0,0,0,.7)); color:#fff; font-size:14px;}
-.scan-status{position:absolute; top:10px; left:10px; right:10px; display:flex; gap:6px; flex-wrap:wrap;}
-.scan-status .pill{background:rgba(0,0,0,.55); color:#fff;}
-.scan-status .pill.on{background:var(--ok);}
+/* ── สแกน (เต็มจอ) ── */
+.scan-full{position:fixed; inset:0; z-index:120; background:#000; overflow:hidden;}
+.scan-full #scanVideo{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;}
+.scan-full #scanOverlay{position:absolute; inset:0; width:100%; height:100%; pointer-events:none;}
+.scan-guide{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:84%; max-width:460px; aspect-ratio:210/297; border:2px dashed rgba(255,255,255,.75);
+  border-radius:10px; pointer-events:none; box-shadow:0 0 0 100vmax rgba(0,0,0,.12);}
+.scan-topbar{position:absolute; top:0; left:0; right:0; padding:calc(10px + env(safe-area-inset-top)) 12px 10px;
+  display:flex; gap:8px; align-items:center; background:linear-gradient(rgba(0,0,0,.6),transparent);}
+.scan-bottombar{position:absolute; bottom:0; left:0; right:0;
+  padding:14px 16px calc(16px + env(safe-area-inset-bottom));
+  background:linear-gradient(transparent,rgba(0,0,0,.8)); display:flex; flex-direction:column; gap:10px; align-items:center;}
+.scan-hint{color:#fff; font-size:14px; text-align:center; text-shadow:0 1px 3px rgba(0,0,0,.6); line-height:1.35;}
+.scan-status{display:flex; gap:6px; flex-wrap:wrap; margin-left:auto;}
+.scan-status .pill{background:rgba(0,0,0,.55); color:#fff; border:1px solid rgba(255,255,255,.25);}
+.scan-status .pill.on{background:var(--ok); border-color:transparent;}
 
 /* ── หน้ากระดาษพิมพ์ ── */
 #printArea{display:none;}
@@ -258,7 +267,7 @@ const Store = {
   data:null,
   // โครงสร้างข้อมูลเริ่มต้น
   defaults(){ return {
-    settings:{ schoolName:'', teacherName:'ครูนนทพัทธ์ หิรัญเรือง', markThreshold:0.45, passScore:50 },
+    settings:{ schoolName:'', teacherName:'ครูนนทพัทธ์ หิรัญเรือง', markThreshold:0.45, passScore:50, cloudSync:false },
     exams:[], students:[], results:[]
   };},
   // โหลดจาก localStorage
@@ -273,10 +282,11 @@ const Store = {
     d.exams=d.exams||[]; d.students=d.students||[]; d.results=d.results||[];
     return Store.data;
   },
-  // บันทึกลง localStorage
+  // บันทึกลง localStorage (+ ซิงก์ขึ้นคลาวด์อัตโนมัติถ้าเปิดใช้)
   save(){
     try{ localStorage.setItem(Store.KEY, JSON.stringify(Store.data)); }
     catch(e){ Utils.toast('บันทึกไม่สำเร็จ (พื้นที่เต็ม?)','err'); }
+    if(Store.data && Store.data.settings && Store.data.settings.cloudSync) CloudSync.schedulePush();
   },
   // helper เข้าถึงข้อมูล
   get settings(){ return Store.data.settings; },
@@ -287,6 +297,87 @@ const Store = {
   resultsOfExam(id){ return Store.data.results.filter(r=>r.examId===id); },
   // แทนที่ทั้ง data (ตอน import)
   replaceAll(obj){ Store.data=obj; Store.save(); },
+};
+
+/* ─────────────────────────── CloudSync: ซิงก์ข้อมูลผ่าน Firebase Firestore ───────────────────────────
+   แนวคิด: ตั้งค่า/สร้างข้อสอบบน PC → อัปโหลดขึ้นคลาวด์ → มือถือดึงมาแล้วสแกน → ผลเด้งกลับคลาวด์
+   คอลเลกชัน: scandee_meta/main (settings+students), scandee_exams/{id}, scandee_results/{id}  */
+const CloudSync = {
+  // config ของโปรเจกต์ (แก้ได้ที่นี่หากเปลี่ยนโปรเจกต์)
+  cfg:{
+    apiKey: "AIzaSyCQs_K8q4NihoZg2-00tBIdOm5WyGKx_R8",
+    authDomain: "scandee-cef0e.firebaseapp.com",
+    projectId: "scandee-cef0e",
+    storageBucket: "scandee-cef0e.firebasestorage.app",
+    messagingSenderId: "712194698002",
+    appId: "1:712194698002:web:33e29eeed05d3918ba21cb"
+  },
+  db:null, ready:false, _pushTimer:null,
+  available(){ return typeof firebase!=='undefined' && firebase.firestore; },
+  // เริ่มเชื่อมต่อ Firestore (เรียกซ้ำได้)
+  init(){
+    if(CloudSync.ready) return true;
+    if(!CloudSync.available()) return false;
+    try{
+      if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(CloudSync.cfg);
+      CloudSync.db=firebase.firestore();
+      CloudSync.ready=true; return true;
+    }catch(e){ console.warn('Firebase init:', e); return false; }
+  },
+  // ── อัปโหลดข้อมูลทั้งหมดขึ้นคลาวด์ ──
+  async pushAll(){
+    if(!CloudSync.init()) throw new Error('เชื่อมต่อคลาวด์ไม่ได้');
+    const db=CloudSync.db;
+    // meta (settings + students) — ไม่เก็บ flag cloudSync ขึ้นคลาวด์
+    const s=Object.assign({},Store.settings); delete s.cloudSync;
+    await db.collection('scandee_meta').doc('main').set({ settings:s, students:Store.data.students||[], updatedAt:Date.now() });
+    // exams
+    if(Store.exams.length){ const be=db.batch();
+      Store.exams.forEach(e=> be.set(db.collection('scandee_exams').doc(e.id), e));
+      await be.commit();
+    }
+    // results (แบ่งชุดละ ≤400)
+    const rs=Store.results;
+    for(let i=0;i<rs.length;i+=400){ const b=db.batch();
+      rs.slice(i,i+400).forEach(r=> b.set(db.collection('scandee_results').doc(r.id), r));
+      await b.commit();
+    }
+  },
+  // ── ดึงข้อมูลทั้งหมดจากคลาวด์ (แทนที่ในเครื่อง) ──
+  async pullAll(){
+    if(!CloudSync.init()) throw new Error('เชื่อมต่อคลาวด์ไม่ได้');
+    const db=CloudSync.db;
+    const [meta, exSnap, rsSnap] = await Promise.all([
+      db.collection('scandee_meta').doc('main').get(),
+      db.collection('scandee_exams').get(),
+      db.collection('scandee_results').get(),
+    ]);
+    const data=Store.defaults();
+    if(meta.exists){ const m=meta.data(); data.settings=Object.assign(data.settings, m.settings||{}); data.students=m.students||[]; }
+    data.exams=exSnap.docs.map(d=>d.data());
+    data.results=rsSnap.docs.map(d=>d.data());
+    data.settings.cloudSync=true;          // คงสถานะเปิดคลาวด์ไว้ในเครื่องนี้
+    localStorage.setItem(Store.KEY, JSON.stringify(data));  // เขียนตรง ไม่ trigger push ซ้ำ
+    Store.load();
+  },
+  // ── ส่งผลสแกนขึ้นคลาวด์ทันที (ใช้ตอนบันทึกผล) ──
+  async pushResult(rec){
+    if(!CloudSync.init()) return;
+    try{ await CloudSync.db.collection('scandee_results').doc(rec.id).set(rec); }catch(e){ console.warn('pushResult',e); }
+  },
+  async deleteResult(id){
+    if(!CloudSync.init()) return;
+    try{ await CloudSync.db.collection('scandee_results').doc(id).delete(); }catch(e){}
+  },
+  async deleteExam(id){
+    if(!CloudSync.init()) return;
+    try{ await CloudSync.db.collection('scandee_exams').doc(id).delete(); }catch(e){}
+  },
+  // ── push แบบหน่วงเวลา (กันยิงถี่ตอนแก้หลายครั้ง) ──
+  schedulePush(){
+    if(CloudSync._pushTimer) clearTimeout(CloudSync._pushTimer);
+    CloudSync._pushTimer=setTimeout(()=>{ CloudSync.pushAll().catch(e=>console.warn('autoPush',e)); }, 1500);
+  },
 };
 
 /* ─────────────────────────── Layout: สูตรตำแหน่ง bubble (แชร์ SheetGen + Scanner) ───────────────────────────
@@ -668,21 +759,35 @@ const Scanner = {
   stream:null, video:null, raf:null, timer:null,
   running:false, work:null, wctx:null,
   lastResult:null, stableCount:0, lastSignature:'',
-  currentExam:null, currentLayout:null,
+  currentExam:null, currentLayout:null, forceCapture:false, _pulled:false,
   onResult:null,  // callback เมื่อผลนิ่ง
 
   // เริ่มกล้อง
   async start(videoEl, overlayEl){
     Scanner.video=videoEl; Scanner.overlay=overlayEl;
+    Scanner.forceCapture=false; Scanner._pulled=false;
     Scanner.work=document.createElement('canvas'); Scanner.wctx=Scanner.work.getContext('2d',{willReadFrequently:true});
+    // ต้องเปิดผ่าน https (หรือ localhost) กล้องจึงทำงาน
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      const h=document.getElementById('scanHint');
+      if(h) h.innerHTML='เบราว์เซอร์นี้เปิดกล้องไม่ได้<br>ต้องเปิดแอปผ่าน https (เช่น Firebase Hosting)';
+      Utils.toast('เปิดกล้องไม่ได้: ต้องใช้ https','err',4500); return false;
+    }
     try{
       Scanner.stream=await navigator.mediaDevices.getUserMedia({
-        video:{ facingMode:{ideal:'environment'}, width:{ideal:1280}, height:{ideal:1707} }, audio:false
+        video:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080} }, audio:false
       });
     }catch(e){
-      Utils.toast('เปิดกล้องไม่ได้: '+e.message,'err',3500); return false;
+      // ลองแบบไม่ระบุความละเอียด
+      try{ Scanner.stream=await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false }); }
+      catch(e2){
+        const h=document.getElementById('scanHint');
+        if(h) h.innerHTML='เปิดกล้องไม่ได้: '+e2.message+'<br>ตรวจว่าอนุญาตสิทธิ์กล้อง และเปิดผ่าน https';
+        Utils.toast('เปิดกล้องไม่ได้: '+e2.message,'err',4500); return false;
+      }
     }
     videoEl.srcObject=Scanner.stream;
+    videoEl.setAttribute('playsinline','');
     await videoEl.play().catch(()=>{});
     Scanner.running=true; Scanner.stableCount=0; Scanner.lastSignature='';
     Scanner.loop();
@@ -726,7 +831,20 @@ const Scanner = {
 
     // โหลด exam ตาม payload
     const exam=Store.examById(payload.examId);
-    if(!exam){ Scanner.updateStatus(state,'ไม่พบข้อสอบนี้ในเครื่อง (QR ไม่ตรง)'); return; }
+    if(!exam){
+      // ลองดึงจากคลาวด์อัตโนมัติ 1 ครั้ง ถ้าเปิดซิงก์ไว้
+      if(Store.settings.cloudSync && CloudSync.available() && !Scanner._pulled){
+        Scanner._pulled=true;
+        Scanner.updateStatus(state,'ไม่พบข้อสอบในเครื่อง — กำลังดึงจากคลาวด์…');
+        CloudSync.pullAll().then(()=>Utils.toast('ดึงข้อสอบจากคลาวด์แล้ว เล็งใหม่อีกครั้ง','ok'))
+          .catch(e=>Utils.toast('ดึงคลาวด์ไม่สำเร็จ: '+e.message,'err',4000));
+      }else{
+        Scanner.updateStatus(state, Store.settings.cloudSync
+          ? 'ไม่พบข้อสอบนี้ในคลาวด์ (QR ไม่ตรง)'
+          : 'ไม่พบข้อสอบในเครื่อง — เปิดซิงก์คลาวด์แล้วดึงข้อสอบก่อน');
+      }
+      return;
+    }
     const set=Store.setInExam(exam, payload.setCode) || (exam.sets&&exam.sets[0]);
     Scanner.currentExam=exam; Scanner.currentSet=set;
     const L=Layout.compute(exam.numQuestions, exam.numChoices);
@@ -821,15 +939,22 @@ const Scanner = {
     Scanner.drawOverlay(fids, w, h);
     Scanner.updateStatus(state, `อ่านได้ • รหัส ${studentCode} • ${grade.score}/${grade.maxScore} คะแนน` + (Scanner.stableCount>=2?' ✓ นิ่งแล้ว':' (ถือนิ่ง…)'));
 
-    // นิ่ง 2 เฟรมติด -> เด้งยืนยัน
-    if(Scanner.stableCount>=2 && Scanner.onResult){
+    // นิ่ง 2 เฟรมติด (หรือกดถ่ายเอง) -> เด้งยืนยัน
+    if((Scanner.stableCount>=2 || Scanner.forceCapture) && Scanner.onResult){
       Utils.vibrate([120,60,120]);
-      const r=Scanner.lastResult; Scanner.pause();
+      const r=Scanner.lastResult; Scanner.forceCapture=false; Scanner.pause();
       Scanner.onResult(r);
     }
   },
+  // ถ่าย/ตรวจทันที: จับผลจากเฟรมที่อ่านได้ทันที (ไม่ต้องรอความนิ่ง)
+  manualCapture(){
+    if(!Scanner.running){ Scanner.resume(); return; }
+    Scanner.forceCapture=true;
+    Utils.toast('กำลังจับภาพ… ถือให้เห็น QR และมุมดำครบ','',1800);
+    Scanner.processFrame();
+  },
   pause(){ Scanner.running=false; if(Scanner.timer){clearTimeout(Scanner.timer);Scanner.timer=null;} },
-  resume(){ if(!Scanner.running && Scanner.stream){ Scanner.running=true; Scanner.stableCount=0; Scanner.lastSignature=''; Scanner.loop(); } },
+  resume(){ if(!Scanner.running && Scanner.stream){ Scanner.running=true; Scanner.stableCount=0; Scanner.lastSignature=''; Scanner.forceCapture=false; Scanner.loop(); } },
 
   // แปลงเป็น grayscale array (Uint8)
   toGray(img, w, h){
@@ -844,7 +969,7 @@ const Scanner = {
   // วิธี: ย่อภาพ, binarize (mean threshold), connected components (BFS),
   //       กรอง blob ตามขนาด+ความเป็นสี่เหลี่ยมทึบ, เลือกตัวใกล้ 4 มุมภาพสุด
   detectFiducials(img, W, H){
-    const scale = Math.min(1, 320/W);
+    const scale = Math.min(1, 400/W);
     const sw=Math.max(60,Math.round(W*scale)), sh=Math.round(H*scale);
     // ย่อ + grayscale
     const tmp=document.createElement('canvas'); tmp.width=sw; tmp.height=sh;
@@ -886,8 +1011,8 @@ const Scanner = {
         const fill=area/box;                  // ความทึบ
         const aspect=bw/bh;
         const relSize=Math.max(bw,bh)/sw;      // ขนาดเทียบกว้างภาพ
-        // fiducial: เกือบสี่เหลี่ยม, ทึบ, ขนาดพอเหมาะ
-        if(fill>0.62 && aspect>0.55 && aspect<1.8 && relSize>0.02 && relSize<0.14 && area>20){
+        // fiducial: เกือบสี่เหลี่ยม, ทึบ, ขนาดพอเหมาะ (ผ่อนเกณฑ์ให้ทนแสง/มุมเอียง)
+        if(fill>0.55 && aspect>0.5 && aspect<2.0 && relSize>0.014 && relSize<0.2 && area>16){
           blobs.push({ cx:sx/cnt, cy:sy/cnt, area, bw, bh, fill });
         }
       }
@@ -950,18 +1075,22 @@ const Scanner = {
     return M.map(r=>r[n]);
   },
 
-  // ── overlay: วาดกรอบ fiducial ที่พบ ──
+  // ── overlay: วาดกรอบ fiducial ที่พบ (แมปพิกัดสำหรับ object-fit: cover) ──
   drawOverlay(fids, w, h){
-    const ov=Scanner.overlay; if(!ov) return;
-    const rect=Scanner.video.getBoundingClientRect();
+    const ov=Scanner.overlay, vid=Scanner.video; if(!ov||!vid) return;
+    const rect=vid.getBoundingClientRect();
+    if(!rect.width||!rect.height) return;
     ov.width=rect.width; ov.height=rect.height;
-    const sx=rect.width/w, sy=rect.height/h;
+    // object-fit: cover → เลือกสเกลใหญ่สุดแล้ว crop กึ่งกลาง
+    const scale=Math.max(rect.width/w, rect.height/h);
+    const offX=(rect.width-w*scale)/2, offY=(rect.height-h*scale)/2;
+    const map=p=>({ x:offX+p.x*scale, y:offY+p.y*scale });
     const c=ov.getContext('2d'); c.clearRect(0,0,ov.width,ov.height);
     c.strokeStyle='#2e9e5b'; c.lineWidth=3; c.beginPath();
     const order=['TL','TR','BR','BL'];
-    order.forEach((k,i)=>{ const p=fids[k]; const X=p.x*sx, Y=p.y*sy; i?c.lineTo(X,Y):c.moveTo(X,Y); });
+    order.forEach((k,i)=>{ const p=map(fids[k]); i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y); });
     c.closePath(); c.stroke();
-    order.forEach(k=>{ const p=fids[k]; c.fillStyle='#2e9e5b'; c.beginPath(); c.arc(p.x*sx,p.y*sy,6,0,7); c.fill(); });
+    order.forEach(k=>{ const p=map(fids[k]); c.fillStyle='#2e9e5b'; c.beginPath(); c.arc(p.x,p.y,6,0,7); c.fill(); });
   },
   updateStatus(state,msg){
     const el=document.getElementById('scanStatus'); if(!el) return;
@@ -1138,9 +1267,12 @@ const UI = {
     const e=Store.examById(id); if(!e) return;
     const nRes=Store.resultsOfExam(id).length;
     Modal.confirm('ลบข้อสอบ?', `ลบ "${Utils.esc(e.name)}"${nRes?` และผลคะแนน ${nRes} รายการ`:''} ถาวร`, ()=>{
+      const delResults=Store.results.filter(r=>r.examId===id).map(r=>r.id);
       Store.data.exams=Store.exams.filter(x=>x.id!==id);
       Store.data.results=Store.results.filter(r=>r.examId!==id);
-      Store.save(); Utils.toast('ลบแล้ว','ok'); UI.exams();
+      Store.save();
+      if(Store.settings.cloudSync){ CloudSync.deleteExam(id); delResults.forEach(rid=>CloudSync.deleteResult(rid)); }
+      Utils.toast('ลบแล้ว','ok'); UI.exams();
     }, 'danger');
   },
 
@@ -1257,24 +1389,29 @@ const UI = {
   },
   togglePrint(c,el){ if(UI._printSel.has(c)){UI._printSel.delete(c); el.classList.remove('sel');} else {UI._printSel.add(c); el.classList.add('sel');} },
 
-  // ════════ หน้าสแกน ════════
+  // ════════ หน้าสแกน (กล้องเต็มจอ) ════════
   scan(){
     if(!Store.exams.length){
-      UI.el().innerHTML=`<div class="card"><div class="empty"><div class="big">📝</div>ยังไม่มีข้อสอบ<br>สร้างข้อสอบและพิมพ์กระดาษก่อนสแกน<br><button class="btn ghost" style="margin-top:12px;" onclick="Router.go('exams')">ไปหน้าข้อสอบ</button></div></div>`;
+      const cloudBtn = CloudSync.available()
+        ? `<button class="btn ghost" style="margin-top:12px;" onclick="UI.cloudPull()">☁️ ดึงข้อสอบจากคลาวด์</button><br>`
+        : '';
+      UI.el().innerHTML=`<div class="card"><div class="empty"><div class="big">📝</div>ยังไม่มีข้อสอบในเครื่องนี้<br>
+        ${cloudBtn}<button class="btn ghost" style="margin-top:12px;" onclick="Router.go('exams')">ไปหน้าข้อสอบ</button></div></div>`;
       return;
     }
     UI.el().innerHTML=`
-    <div class="card" style="padding:10px;">
-      <div id="scanWrap">
-        <video id="scanVideo" playsinline muted></video>
-        <canvas id="scanOverlay"></canvas>
+    <div class="scan-full" id="scanFull">
+      <video id="scanVideo" playsinline autoplay muted></video>
+      <canvas id="scanOverlay"></canvas>
+      <div class="scan-guide"></div>
+      <div class="scan-topbar">
+        <button class="btn gray sm" onclick="Scanner.stop(); Router.go('home')">✕ ปิด</button>
         <div class="scan-status" id="scanStatus"></div>
-        <div class="scan-hint" id="scanHint">กำลังเปิดกล้อง…</div>
       </div>
-    </div>
-    <div class="card">
-      <div class="muted">เล็งให้เห็น <b>QR (มุมขวาบน)</b> และ <b>สี่เหลี่ยมดำครบ 4 มุม</b> ถือกล้องให้นิ่ง ระบบจะสั่นเมื่ออ่านสำเร็จ</div>
-      <button class="btn block gray" style="margin-top:10px;" onclick="Scanner.stop(); Router.go('home')">หยุดสแกน</button>
+      <div class="scan-bottombar">
+        <div class="scan-hint" id="scanHint">กำลังเปิดกล้อง…</div>
+        <button class="btn ok lg" id="captureBtn" style="min-width:220px;" onclick="Scanner.manualCapture()">📸 ถ่าย/ตรวจทันที</button>
+      </div>
     </div>`;
     const v=document.getElementById('scanVideo'), ov=document.getElementById('scanOverlay');
     Scanner.onResult=(r)=>UI.confirmScan(r);
@@ -1475,6 +1612,7 @@ const UI = {
     const r=Store.results.find(x=>x.id===id); if(!r) return;
     Modal.confirm('ลบผลนี้?', `ลบผลของรหัส ${Utils.esc(r.studentCode)}`, ()=>{
       Store.data.results=Store.results.filter(x=>x.id!==id); Store.save();
+      if(Store.settings.cloudSync) CloudSync.deleteResult(id);
       UI.results(r.examId); Utils.toast('ลบแล้ว','ok');
     },'danger');
   },
@@ -1499,6 +1637,20 @@ const UI = {
       </div>
       <div class="muted" style="margin-top:-6px; margin-bottom:10px;">ค่าน้อย=ไวขึ้น (จับฝนจาง), ค่ามาก=เข้มขึ้น แนะนำ 0.45</div>
       <button class="btn block ok" onclick="UI.saveSettings()">💾 บันทึกตั้งค่า</button>
+    </div>
+
+    <div class="card"><h2>☁️ ซิงก์คลาวด์ (Firebase)</h2>
+      <div class="muted" style="margin-bottom:10px;">ตั้งค่า/สร้างข้อสอบบนคอมพิวเตอร์ แล้วให้มือถือดึงข้อมูลไปสแกน — ผลคะแนนจะเด้งกลับให้ทุกเครื่องเห็นตรงกัน</div>
+      <label class="row" style="justify-content:space-between; margin-bottom:10px;">
+        <span style="font-weight:600;">เปิดใช้ซิงก์คลาวด์</span>
+        <input id="s_cloud" type="checkbox" style="width:22px;height:22px;" ${S.cloudSync?'checked':''} onchange="UI.toggleCloud(this.checked)">
+      </label>
+      <div class="grid2">
+        <button class="btn ghost" onclick="UI.cloudPush()">⬆️ อัปโหลดขึ้นคลาวด์</button>
+        <button class="btn ghost" onclick="UI.cloudPull()">⬇️ ดึงจากคลาวด์</button>
+      </div>
+      <div id="cloudStatus" class="muted" style="margin-top:8px;"></div>
+      <div class="muted" style="margin-top:8px; font-size:12px;">💡 บนมือถือ: กด "ดึงจากคลาวด์" ครั้งแรกเพื่อรับข้อสอบ แล้วจึงเริ่มสแกน • ต้องเปิดแอปผ่าน https (เช่น Firebase Hosting) กล้องจึงทำงาน</div>
     </div>
 
     <div class="card"><h2>สำรอง / กู้คืนข้อมูล</h2>
@@ -1530,6 +1682,32 @@ const UI = {
     S.passScore=Utils.clamp(parseFloat(document.getElementById('s_pass').value)||50,0,100);
     S.markThreshold=Utils.clamp(parseFloat(document.getElementById('s_thr').value)||0.45,0.15,0.85);
     Store.save(); Utils.toast('บันทึกตั้งค่าแล้ว','ok');
+  },
+  // ── คลาวด์ ──
+  toggleCloud(on){
+    if(on && !CloudSync.available()){ Utils.toast('โหลด Firebase ไม่สำเร็จ (ตรวจอินเทอร์เน็ต)','err',3500);
+      document.getElementById('s_cloud').checked=false; return; }
+    Store.settings.cloudSync=on; Store.save();
+    Utils.toast(on?'เปิดซิงก์คลาวด์แล้ว':'ปิดซิงก์คลาวด์','ok');
+    const st=document.getElementById('cloudStatus'); if(st) st.textContent=on?'พร้อมซิงก์ — ข้อมูลจะอัปโหลดอัตโนมัติเมื่อมีการเปลี่ยนแปลง':'';
+  },
+  async cloudPush(){
+    if(!CloudSync.available()){ Utils.toast('Firebase ยังไม่พร้อม','err'); return; }
+    const st=document.getElementById('cloudStatus'); if(st) st.textContent='กำลังอัปโหลด…';
+    try{ await CloudSync.pushAll(); Store.settings.cloudSync=true; Store.save();
+      const c=document.getElementById('s_cloud'); if(c) c.checked=true;
+      if(st) st.textContent=`อัปโหลดสำเร็จ • ข้อสอบ ${Store.exams.length} • ผล ${Store.results.length}`;
+      Utils.toast('อัปโหลดขึ้นคลาวด์แล้ว','ok');
+    }catch(e){ if(st) st.textContent='ผิดพลาด: '+e.message; Utils.toast('อัปโหลดไม่สำเร็จ: '+e.message,'err',4500); }
+  },
+  async cloudPull(){
+    if(!CloudSync.available()){ Utils.toast('Firebase ยังไม่พร้อม','err'); return; }
+    Modal.confirm('ดึงข้อมูลจากคลาวด์?','ข้อมูลในเครื่องจะถูกแทนที่ด้วยข้อมูลจากคลาวด์', async()=>{
+      const st=document.getElementById('cloudStatus'); if(st) st.textContent='กำลังดึง…';
+      try{ await CloudSync.pullAll();
+        Utils.toast('ดึงข้อมูลจากคลาวด์แล้ว','ok'); UI.settings();
+      }catch(e){ if(st) st.textContent='ผิดพลาด: '+e.message; Utils.toast('ดึงไม่สำเร็จ: '+e.message,'err',4500); }
+    });
   },
   exportAll(){ Utils.download(`scandee_backup_${Utils.todayStr()}.json`, JSON.stringify(Store.data,null,2)); Utils.toast('ส่งออกทั้งระบบแล้ว','ok'); },
   exportResultsAll(){
@@ -1634,9 +1812,14 @@ const Router = {
 };
 
 /* ─────────────────────────── บูตแอป ─────────────────────────── */
-window.addEventListener('DOMContentLoaded',()=>{
+window.addEventListener('DOMContentLoaded',async()=>{
   Store.load();
   if(typeof qrcode==='undefined') Utils.toast('โหลดไลบรารี QR ไม่สำเร็จ (ตรวจอินเทอร์เน็ต)','warn',4000);
+  // ถ้าเปิดซิงก์คลาวด์ไว้ ให้ดึงข้อมูลล่าสุดจากคลาวด์ก่อนแสดงผล
+  if(Store.settings.cloudSync && CloudSync.available()){
+    Utils.toast('กำลังดึงข้อมูลจากคลาวด์…','',1800);
+    try{ await CloudSync.pullAll(); }catch(e){ Utils.toast('ดึงคลาวด์ไม่สำเร็จ: '+e.message,'warn',3500); }
+  }
   Router.init();
 });
 // หยุดกล้องเมื่อออกจากหน้า
